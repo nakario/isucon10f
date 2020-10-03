@@ -40,7 +40,7 @@ import (
 )
 
 const (
-	TeamCapacity               = 40
+	TeamCapacity               = 100
 	AdminID                    = "admin"
 	AdminPassword              = "admin"
 	DebugContestStatusFilePath = "/tmp/XSUPORTAL_CONTEST_STATUS"
@@ -55,7 +55,7 @@ func main() {
 	go func() { log.Println(http.ListenAndServe(":9090", nil)) }()
 	go resetPublicLeaderboardCacheEvery(500 * time.Millisecond)
 	srv := echo.New()
-	srv.Debug = util.GetEnv("DEBUG", "") != ""
+	srv.Debug = false
 	srv.Server.Addr = fmt.Sprintf(":%v", util.GetEnv("PORT", "9292"))
 	srv.HideBanner = true
 
@@ -68,9 +68,8 @@ func main() {
 	}
 
 	db, _ = xsuportal.GetDB()
-	db.SetMaxOpenConns(50)
+	db.SetMaxOpenConns(120)
 
-	srv.Use(middleware.Logger())
 	srv.Use(middleware.Recover())
 	srv.Use(session.Middleware(sessions.NewCookieStore([]byte("tagomoris"))))
 
@@ -124,6 +123,8 @@ func main() {
 	srv.POST("/api/login", contestant.Login)
 	srv.POST("/api/logout", contestant.Logout)
 
+	log.Println("========================================")
+
 	srv.Logger.Error(srv.StartServer(srv.Server))
 }
 
@@ -165,7 +166,7 @@ func (*AdminService) Initialize(e echo.Context) error {
 			return fmt.Errorf("truncate table: %w", err)
 		}
 	}
-	
+
 	xsuportal.PushSubscriptionGroup = &singleflight.Group{}
 
 	passwordHash := sha256.Sum256([]byte(AdminPassword))
@@ -176,12 +177,20 @@ func (*AdminService) Initialize(e echo.Context) error {
 	}
 
 	if req.Contest != nil {
+		freezesAt := req.Contest.ContestFreezesAt.AsTime().Round(time.Microsecond)
+		endsAt := req.Contest.ContestEndsAt.AsTime().Round(time.Microsecond)
+		go func(){
+			<-time.After(freezesAt.Sub(time.Now()))
+			freezeCh <- struct{}{}
+			<-time.After(endsAt.Sub(time.Now()))
+			endCh <- struct{}{}
+		}()
 		_, err := db.Exec(
 			"INSERT `contest_config` (`registration_open_at`, `contest_starts_at`, `contest_freezes_at`, `contest_ends_at`) VALUES (?, ?, ?, ?)",
 			req.Contest.RegistrationOpenAt.AsTime().Round(time.Microsecond),
 			req.Contest.ContestStartsAt.AsTime().Round(time.Microsecond),
-			req.Contest.ContestFreezesAt.AsTime().Round(time.Microsecond),
-			req.Contest.ContestEndsAt.AsTime().Round(time.Microsecond),
+			freezesAt,
+			endsAt,
 		)
 		if err != nil {
 			return fmt.Errorf("insert contest: %w", err)
@@ -581,7 +590,7 @@ func (*ContestantService) ListNotifications(e echo.Context) error {
 
 	// Empty implementation;
 	// Implemented in notifier.go with Web Push
-	
+
 	return writeProto(e, http.StatusOK, &contestantpb.ListNotificationsResponse{
 		Notifications:               []*resources.Notification{},
 		LastAnsweredClarificationId: 0,
@@ -1330,6 +1339,8 @@ func makeContestPB(e echo.Context) (*resourcespb.Contest, error) {
 }
 
 var publicLeaderboardGroup = &singleflight.Group{}
+var freezeCh = make(chan struct{}, 10)
+var endCh = make(chan struct{}, 10)
 
 func resetPublicLeaderboardCacheEvery(d time.Duration) {
 	ticker := time.NewTicker(d)
@@ -1337,6 +1348,8 @@ func resetPublicLeaderboardCacheEvery(d time.Duration) {
 		select {
 		case <-ticker.C:
 			publicLeaderboardGroup.Forget("0")
+		case <-freezeCh:
+			<-endCh
 		}
 	}
 }
