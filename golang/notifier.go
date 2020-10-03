@@ -149,8 +149,8 @@ func (n *Notifier) SendWebPush(notificationPB *resources.Notification, pushSubsc
 	message := make([]byte, base64.StdEncoding.EncodedLen(len(b)))
 	base64.StdEncoding.Encode(message, b)
 
-	vapidPrivateKey := n.options.VAPIDPrivateKey
-	vapidPublicKey := n.options.VAPIDPublicKey
+	vapidPrivateKey := n.VAPIDKey().VAPIDPrivateKey
+	vapidPublicKey := n.VAPIDKey().VAPIDPublicKey
 
 	resp, err := webpush.SendNotification(
 		message,
