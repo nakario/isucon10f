@@ -5,7 +5,6 @@ import (
 	"crypto/x509"
 	"database/sql"
 	"encoding/base64"
-	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"io/ioutil"
@@ -231,11 +230,6 @@ func (n *Notifier) notify(db sqlx.Ext, notificationPB *resources.Notification, c
 	}
 
 	for _, subscription := range subscriptions {
-		jsonBytes, err := json.Marshal(subscription)
-		if err != nil {
-			return nil, fmt.Errorf("subscription to json: %w", err)
-		}
-		fmt.Printf("Sending web push: push_subscription=%v\n", string(jsonBytes))
 		err = n.SendWebPush(notificationPB, &subscription)
 		if err != nil {
 			return nil, fmt.Errorf("send webpush: %w", err)
