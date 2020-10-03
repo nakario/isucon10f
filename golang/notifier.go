@@ -13,6 +13,7 @@ import (
 	"github.com/SherClockHolmes/webpush-go"
 	"github.com/golang/protobuf/proto"
 	"github.com/jmoiron/sqlx"
+	"golang.org/x/sync/singleflight"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/isucon/isucon10-final/webapp/golang/proto/xsuportal/resources"
@@ -181,6 +182,18 @@ func (n *Notifier) SendWebPush(notificationPB *resources.Notification, pushSubsc
 	return nil
 }
 
+var PushSubscriptionGroup = &singleflight.Group{}
+
+func getPushSubscriptionsSF(db sqlx.Queryer, contestantID string) ([]PushSubscription, error) {
+	v, err, _ := PushSubscriptionGroup.Do(contestantID, func() (interface{}, error) {
+		return getPushSubscriptions(db, contestantID)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return v.([]PushSubscription), nil
+}
+
 func getPushSubscriptions(db sqlx.Queryer, contestantID string) ([]PushSubscription, error) {
 	var subscriptions []PushSubscription
 	err := sqlx.Select(
@@ -224,7 +237,7 @@ func (n *Notifier) notify(db sqlx.Ext, notificationPB *resources.Notification, c
 	notificationPB.Id = notification.ID
 	notificationPB.CreatedAt = timestamppb.New(notification.CreatedAt)
 
-	subscriptions, err := getPushSubscriptions(db, contestantID)
+	subscriptions, err := getPushSubscriptionsSF(db, contestantID)
 	if err != nil {
 		return nil, fmt.Errorf("get push subscriptions: %w", err)
 	}

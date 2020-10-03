@@ -165,6 +165,8 @@ func (*AdminService) Initialize(e echo.Context) error {
 			return fmt.Errorf("truncate table: %w", err)
 		}
 	}
+	
+	xsuportal.PushSubscriptionGroup = &singleflight.Group{}
 
 	passwordHash := sha256.Sum256([]byte(AdminPassword))
 	digest := hex.EncodeToString(passwordHash[:])
@@ -611,6 +613,7 @@ func (*ContestantService) SubscribeNotification(e echo.Context) error {
 	if err != nil {
 		return fmt.Errorf("insert push_subscription: %w", err)
 	}
+	xsuportal.PushSubscriptionGroup.Forget(contestant.ID)
 	return writeProto(e, http.StatusOK, &contestantpb.SubscribeNotificationResponse{})
 }
 
@@ -637,6 +640,7 @@ func (*ContestantService) UnsubscribeNotification(e echo.Context) error {
 	if err != nil {
 		return fmt.Errorf("delete push_subscription: %w", err)
 	}
+	xsuportal.PushSubscriptionGroup.Forget(contestant.ID)
 	return writeProto(e, http.StatusOK, &contestantpb.UnsubscribeNotificationResponse{})
 }
 
