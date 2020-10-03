@@ -39,7 +39,7 @@ import (
 )
 
 const (
-	TeamCapacity               = 10
+	TeamCapacity               = 40
 	AdminID                    = "admin"
 	AdminPassword              = "admin"
 	DebugContestStatusFilePath = "/tmp/XSUPORTAL_CONTEST_STATUS"
@@ -67,7 +67,7 @@ func main() {
 	}
 
 	db, _ = xsuportal.GetDB()
-	db.SetMaxOpenConns(10)
+	db.SetMaxOpenConns(50)
 
 	srv.Use(middleware.Logger())
 	srv.Use(middleware.Recover())
