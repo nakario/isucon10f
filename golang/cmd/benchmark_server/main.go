@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/http"
+	_ "net/http/pprof"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -269,6 +271,7 @@ func pollBenchmarkJob(db sqlx.Queryer) (*xsuportal.BenchmarkJob, error) {
 }
 
 func main() {
+	go func() { log.Println(http.ListenAndServe(":9009", nil)) }()
 	port := util.GetEnv("PORT", "50051")
 	address := ":" + port
 

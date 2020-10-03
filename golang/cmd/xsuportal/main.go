@@ -10,7 +10,9 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"net/http"
+	_ "net/http/pprof"
 	"strconv"
 	"strings"
 	"time"
@@ -48,6 +50,7 @@ var db *sqlx.DB
 var notifier xsuportal.Notifier
 
 func main() {
+	go func() { log.Println(http.ListenAndServe(":9090", nil)) }()
 	srv := echo.New()
 	srv.Debug = util.GetEnv("DEBUG", "") != ""
 	srv.Server.Addr = fmt.Sprintf(":%v", util.GetEnv("PORT", "9292"))
