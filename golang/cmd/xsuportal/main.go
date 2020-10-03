@@ -167,6 +167,7 @@ func (*AdminService) Initialize(e echo.Context) error {
 	}
 	
 	xsuportal.PushSubscriptionGroup = &singleflight.Group{}
+	loginGroup = &singleflight.Group{}
 
 	passwordHash := sha256.Sum256([]byte(AdminPassword))
 	digest := hex.EncodeToString(passwordHash[:])
@@ -726,6 +727,12 @@ func (*ContestantService) Logout(e echo.Context) error {
 		if err := sess.Save(e.Request(), e.Response()); err != nil {
 			return fmt.Errorf("delete session: %w", err)
 		}
+
+		cookie, err := e.Cookie("xsucon_session")
+		if err != nil {
+			return fmt.Errorf("read cookie: %w", err)
+		}
+		loginGroup.Forget(cookie.Value)
 	} else {
 		return halt(e, http.StatusUnauthorized, "ログインしていません", nil)
 	}
@@ -1188,7 +1195,23 @@ type loginRequiredOption struct {
 	Lock bool
 }
 
+var loginGroup = &singleflight.Group{}
+
 func loginRequired(e echo.Context, db sqlx.Queryer, option *loginRequiredOption) (bool, error) {
+	cookie, err := e.Cookie("xsucon_session")
+	if err != nil {
+		return false, fmt.Errorf("read cookie: %w", err)
+	}
+	v, err, _ := loginGroup.Do(cookie.Value, func() (interface{}, error) {
+		return loginRequiredImpl(e, db, option)
+	})
+	if err != nil {
+		return false, err
+	}
+	return v.(bool), nil
+}
+
+func loginRequiredImpl(e echo.Context, db sqlx.Queryer, option *loginRequiredOption) (bool, error) {
 	contestant, err := getCurrentContestant(e, db, option.Lock)
 	if err != nil {
 		return false, fmt.Errorf("current contestant: %w", err)
