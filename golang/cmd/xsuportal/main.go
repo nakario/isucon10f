@@ -575,10 +575,6 @@ func (*ContestantService) Dashboard(e echo.Context) error {
 }
 
 func (*ContestantService) ListNotifications(e echo.Context) error {
-	if ok, err := loginRequired(e, db, &loginRequiredOption{Team: true}); !ok {
-		return wrapError("check session", err)
-	}
-
 	// Empty implementation;
 	// Implemented in notifier.go with Web Push
 	
