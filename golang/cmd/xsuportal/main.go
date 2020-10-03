@@ -1134,13 +1134,11 @@ func (*AudienceService) ListTeams(e echo.Context) error {
 }
 
 func (*AudienceService) Dashboard(e echo.Context) error {
-	leaderboard, err := makePublicLeaderboardPB()
+	res, err := makePublicLeaderboardPBProto()
 	if err != nil {
 		return fmt.Errorf("make leaderboard: %w", err)
 	}
-	return writeProto(e, http.StatusOK, &audiencepb.DashboardResponse{
-		Leaderboard: leaderboard,
-	})
+	return writeRes(e, http.StatusOK, res)
 }
 
 type XsuportalContext struct {
@@ -1277,6 +1275,10 @@ func writeProto(e echo.Context, code int, m proto.Message) error {
 	return e.Blob(code, "application/vnd.google.protobuf", res)
 }
 
+func writeRes(e echo.Context, code int, res []byte) error {
+	return e.Blob(code, "application/vnd.google.protobuf", res)
+}
+
 func halt(e echo.Context, code int, humanMessage string, err error) error {
 	message := &xsuportalpb.Error{
 		Code: int32(code),
@@ -1390,10 +1392,16 @@ func resetPublicLeaderboardCacheEvery(d time.Duration) {
 	}
 }
 
-func makePublicLeaderboardPB() (*resourcespb.Leaderboard, error) {
+func makePublicLeaderboardPBProto() ([]byte, error) {
 	v, err, shared := publicLeaderboardGroup.Do("0", func() (interface{}, error) {
 		lb, err := makeLeaderboardPB(0)
-		return lb, err
+		if err != nil {
+			return nil, err
+		}
+		res, _ := proto.Marshal(&audiencepb.DashboardResponse{
+			Leaderboard: lb,
+		})
+		return res, nil
 	})
 	if err != nil {
 		return nil, err
@@ -1401,7 +1409,7 @@ func makePublicLeaderboardPB() (*resourcespb.Leaderboard, error) {
 	if shared {
 		log.Println("PublicLeaderboard shared cache!")
 	}
-	return v.(*resourcespb.Leaderboard), nil
+	return v.([]byte), nil
 }
 
 func makeLeaderboardPB(teamID int64) (*resourcespb.Leaderboard, error) {
