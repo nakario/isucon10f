@@ -3,7 +3,9 @@ package xsuportal
 import (
 	"crypto/elliptic"
 	"crypto/x509"
+	"database/sql"
 	"encoding/base64"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"io/ioutil"
@@ -139,6 +141,61 @@ func (n *Notifier) NotifyBenchmarkJobFinished(db sqlx.Ext, job *BenchmarkJob) er
 	return nil
 }
 
+func (n *Notifier) SendWebPush(notificationPB *resources.Notification, pushSubscription *PushSubscription) error {
+	b, err := proto.Marshal(notificationPB)
+	if err != nil {
+		return fmt.Errorf("marshal notification: %w", err)
+	}
+	message := make([]byte, base64.StdEncoding.EncodedLen(len(b)))
+	base64.StdEncoding.Encode(message, b)
+
+	vapidPrivateKey := n.options.VAPIDPrivateKey
+	vapidPublicKey := n.options.VAPIDPublicKey
+
+	resp, err := webpush.SendNotification(
+		message,
+		&webpush.Subscription{
+			Endpoint: pushSubscription.Endpoint,
+			Keys: webpush.Keys{
+				Auth:   pushSubscription.Auth,
+				P256dh: pushSubscription.P256DH,
+			},
+		},
+		&webpush.Options{
+			Subscriber:      WebpushSubject,
+			VAPIDPublicKey:  vapidPublicKey,
+			VAPIDPrivateKey: vapidPrivateKey,
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("send notification: %w", err)
+	}
+	defer resp.Body.Close()
+	expired := resp.StatusCode == 410
+	if expired {
+		return fmt.Errorf("expired notification")
+	}
+	invalid := resp.StatusCode == 404
+	if invalid {
+		return fmt.Errorf("invalid notification")
+	}
+	return nil
+}
+
+func getPushSubscriptions(db sqlx.Queryer, contestantID string) ([]PushSubscription, error) {
+	var subscriptions []PushSubscription
+	err := sqlx.Select(
+		db,
+		&subscriptions,
+		"SELECT * FROM `push_subscriptions` WHERE `contestant_id` = ?",
+		contestantID,
+	)
+	if err != sql.ErrNoRows && err != nil {
+		return nil, fmt.Errorf("select push subscriptions: %w", err)
+	}
+	return subscriptions, nil
+}
+
 func (n *Notifier) notify(db sqlx.Ext, notificationPB *resources.Notification, contestantID string) (*Notification, error) {
 	m, err := proto.Marshal(notificationPB)
 	if err != nil {
@@ -146,7 +203,7 @@ func (n *Notifier) notify(db sqlx.Ext, notificationPB *resources.Notification, c
 	}
 	encodedMessage := base64.StdEncoding.EncodeToString(m)
 	res, err := db.Exec(
-		"INSERT INTO `notifications` (`contestant_id`, `encoded_message`, `read`, `created_at`, `updated_at`) VALUES (?, ?, FALSE, NOW(6), NOW(6))",
+		"INSERT INTO `notifications` (`contestant_id`, `encoded_message`, `read`, `created_at`, `updated_at`) VALUES (?, ?, TRUE, NOW(6), NOW(6))",
 		contestantID,
 		encodedMessage,
 	)
@@ -164,6 +221,27 @@ func (n *Notifier) notify(db sqlx.Ext, notificationPB *resources.Notification, c
 	if err != nil {
 		return nil, fmt.Errorf("get inserted notification: %w", err)
 	}
+
+	notificationPB.Id = notification.ID
+	notificationPB.CreatedAt = timestamppb.New(notification.CreatedAt)
+
+	subscriptions, err := getPushSubscriptions(db, contestantID)
+	if err != nil {
+		return nil, fmt.Errorf("get push subscriptions: %w", err)
+	}
+
+	for _, subscription := range subscriptions {
+		jsonBytes, err := json.Marshal(subscription)
+		if err != nil {
+			return nil, fmt.Errorf("subscription to json: %w", err)
+		}
+		fmt.Printf("Sending web push: push_subscription=%v\n", string(jsonBytes))
+		err = n.SendWebPush(notificationPB, &subscription)
+		if err != nil {
+			return nil, fmt.Errorf("send webpush: %w", err)
+		}
+	}
+
 	return &notification, nil
 }
 
