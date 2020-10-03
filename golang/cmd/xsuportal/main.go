@@ -69,6 +69,7 @@ func main() {
 
 	db, _ = xsuportal.GetDB()
 	db.SetMaxOpenConns(120)
+	db.SetConnMaxLifetime(time.Second * 10)
 
 	srv.Use(middleware.Recover())
 	srv.Use(session.Middleware(sessions.NewCookieStore([]byte("tagomoris"))))
@@ -179,7 +180,7 @@ func (*AdminService) Initialize(e echo.Context) error {
 	if req.Contest != nil {
 		freezesAt := req.Contest.ContestFreezesAt.AsTime().Round(time.Microsecond)
 		endsAt := req.Contest.ContestEndsAt.AsTime().Round(time.Microsecond)
-		go func(){
+		go func() {
 			<-time.After(freezesAt.Sub(time.Now()))
 			freezeCh <- struct{}{}
 			<-time.After(endsAt.Sub(time.Now()))
