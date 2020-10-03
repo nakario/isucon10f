@@ -8,6 +8,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"sync"
 
 	"github.com/SherClockHolmes/webpush-go"
@@ -245,7 +246,7 @@ func (n *Notifier) notify(db sqlx.Ext, notificationPB *resources.Notification, c
 	for _, subscription := range subscriptions {
 		err = n.SendWebPush(notificationPB, &subscription)
 		if err != nil {
-			return nil, fmt.Errorf("send webpush: %w", err)
+			log.Println("send webpush: ", err)
 		}
 	}
 
