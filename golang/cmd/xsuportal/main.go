@@ -312,7 +312,7 @@ func (*AdminService) RespondClarification(e echo.Context) error {
 	var clarificationBefore xsuportal.Clarification
 	err = tx.Get(
 		&clarificationBefore,
-		"SELECT * FROM `clarifications` WHERE `id` = ? LIMIT 1 FOR UPDATE",
+		"SELECT * FROM `clarifications` WHERE `id` = ? LIMIT 1",
 		id,
 	)
 	if err == sql.ErrNoRows {
@@ -324,24 +324,26 @@ func (*AdminService) RespondClarification(e echo.Context) error {
 	wasAnswered := clarificationBefore.AnsweredAt.Valid
 	wasDisclosed := clarificationBefore.Disclosed
 
+	now := time.Now().Round(time.Microsecond)
 	_, err = tx.Exec(
-		"UPDATE `clarifications` SET `disclosed` = ?, `answer` = ?, `updated_at` = NOW(6), `answered_at` = NOW(6) WHERE `id` = ? LIMIT 1",
+		"UPDATE `clarifications` SET `disclosed` = ?, `answer` = ?, `updated_at` = ?, `answered_at` = ? WHERE `id` = ? LIMIT 1",
 		req.Disclose,
 		req.Answer,
+		now,
+		now,
 		id,
 	)
 	if err != nil {
+		if err == sql.ErrNoRows {
+			return halt(e, http.StatusNotFound, "質問が見つかりません", nil)
+		}
 		return fmt.Errorf("update clarification: %w", err)
 	}
-	var clarification xsuportal.Clarification
-	err = tx.Get(
-		&clarification,
-		"SELECT * FROM `clarifications` WHERE `id` = ? LIMIT 1",
-		id,
-	)
-	if err != nil {
-		return fmt.Errorf("get clarification: %w", err)
-	}
+	var clarification xsuportal.Clarification = clarificationBefore
+	clarification.Disclosed.Scan(req.Disclose)
+	clarification.Answer.Scan(req.Answer)
+	clarification.UpdatedAt = now
+	clarification.AnsweredAt.Scan(now)
 	var team xsuportal.Team
 	err = tx.Get(
 		&team,
