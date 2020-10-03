@@ -40,7 +40,7 @@ import (
 )
 
 const (
-	TeamCapacity               = 40
+	TeamCapacity               = 100
 	AdminID                    = "admin"
 	AdminPassword              = "admin"
 	DebugContestStatusFilePath = "/tmp/XSUPORTAL_CONTEST_STATUS"
@@ -55,7 +55,7 @@ func main() {
 	go func() { log.Println(http.ListenAndServe(":9090", nil)) }()
 	go resetPublicLeaderboardCacheEvery(500 * time.Millisecond)
 	srv := echo.New()
-	srv.Debug = util.GetEnv("DEBUG", "") != ""
+	srv.Debug = false
 	srv.Server.Addr = fmt.Sprintf(":%v", util.GetEnv("PORT", "9292"))
 	srv.HideBanner = true
 
@@ -68,9 +68,8 @@ func main() {
 	}
 
 	db, _ = xsuportal.GetDB()
-	db.SetMaxOpenConns(50)
+	db.SetMaxOpenConns(120)
 
-	srv.Use(middleware.Logger())
 	srv.Use(middleware.Recover())
 	srv.Use(session.Middleware(sessions.NewCookieStore([]byte("tagomoris"))))
 
@@ -124,6 +123,8 @@ func main() {
 	srv.POST("/api/login", contestant.Login)
 	srv.POST("/api/logout", contestant.Logout)
 
+	log.Println("========================================")
+
 	srv.Logger.Error(srv.StartServer(srv.Server))
 }
 
@@ -165,7 +166,7 @@ func (*AdminService) Initialize(e echo.Context) error {
 			return fmt.Errorf("truncate table: %w", err)
 		}
 	}
-	
+
 	xsuportal.PushSubscriptionGroup = &singleflight.Group{}
 
 	passwordHash := sha256.Sum256([]byte(AdminPassword))
@@ -589,7 +590,7 @@ func (*ContestantService) ListNotifications(e echo.Context) error {
 
 	// Empty implementation;
 	// Implemented in notifier.go with Web Push
-	
+
 	return writeProto(e, http.StatusOK, &contestantpb.ListNotificationsResponse{
 		Notifications:               []*resources.Notification{},
 		LastAnsweredClarificationId: 0,
