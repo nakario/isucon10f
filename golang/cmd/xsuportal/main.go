@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	syncmapserver "github.com/aokabi/go-syncmapserver"
 	"github.com/go-sql-driver/mysql"
 	"github.com/golang/protobuf/proto"
 	"github.com/gorilla/sessions"
@@ -50,6 +51,12 @@ const (
 
 var db *sqlx.DB
 var notifier xsuportal.Notifier
+
+const RedisHostPrivateIPAddress = "10.162.10.101"
+const LeaderBoardServerKey = "board"
+
+var isMasterServerIP = syncmapserver.MyServerIsOnMasterServerIP()
+var idToLeaderBoardServer = syncmapserver.NewSyncMapServerConn(syncmapserver.GetMasterServerAddress()+":8884", isMasterServerIP)
 
 func main() {
 	go func() { log.Println(http.ListenAndServe(":9090", nil)) }()
@@ -179,7 +186,7 @@ func (*AdminService) Initialize(e echo.Context) error {
 	if req.Contest != nil {
 		freezesAt := req.Contest.ContestFreezesAt.AsTime().Round(time.Microsecond)
 		endsAt := req.Contest.ContestEndsAt.AsTime().Round(time.Microsecond)
-		go func(){
+		go func() {
 			<-time.After(freezesAt.Sub(time.Now()))
 			freezeCh <- struct{}{}
 			<-time.After(endsAt.Sub(time.Now()))
@@ -574,9 +581,16 @@ func (*ContestantService) Dashboard(e echo.Context) error {
 		return wrapError("check session", err)
 	}
 	team, _ := getCurrentTeam(e, db, false)
-	leaderboard, err := makeLeaderboardPB(team.ID)
-	if err != nil {
-		return fmt.Errorf("make leaderboard: %w", err)
+
+	var leaderboard *resourcespb.Leaderboard
+	if idToLeaderBoardServer.Exists(LeaderBoardServerKey) {
+		idToLeaderBoardServer.Get(LeaderBoardServerKey, leaderboard)
+	} else {
+		leaderboard, err := makeLeaderboardPB(team.ID)
+		if err != nil {
+			return fmt.Errorf("make leaderboard: %w", err)
+		}
+		idToLeaderBoardServer.Set(LeaderBoardServerKey, leaderboard)
 	}
 	return writeProto(e, http.StatusOK, &contestantpb.DashboardResponse{
 		Leaderboard: leaderboard,

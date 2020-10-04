@@ -4,6 +4,7 @@ go 1.15
 
 require (
 	github.com/SherClockHolmes/webpush-go v1.1.2
+	github.com/aokabi/go-syncmapserver v0.0.0-20201004162414-759f5f4fe19e // indirect
 	github.com/go-sql-driver/mysql v1.5.0
 	github.com/golang/protobuf v1.4.2
 	github.com/gorilla/sessions v1.2.1

@@ -7,11 +7,13 @@ import (
 	"encoding/base64"
 	"fmt"
 	"log"
+	"math"
 	"net"
 	"net/http"
 	_ "net/http/pprof"
 	"time"
 
+	syncmapserver "github.com/aokabi/go-syncmapserver"
 	"github.com/jmoiron/sqlx"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -25,6 +27,12 @@ import (
 )
 
 var db *sqlx.DB
+
+const RedisHostPrivateIPAddress = "10.162.10.101"
+const LeaderBoardServerKey = "board"
+
+var isMasterServerIP = syncmapserver.MyServerIsOnMasterServerIP()
+var idToLeaderBoardServer = syncmapserver.NewSyncMapServerConn(syncmapserver.GetMasterServerAddress()+":8884", isMasterServerIP)
 
 type benchmarkQueueService struct {
 }
@@ -222,6 +230,36 @@ func (b *benchmarkReportService) saveAsFinished(db sqlx.Execer, job *xsuportal.B
 	if err != nil {
 		return fmt.Errorf("update benchmark job status: %w", err)
 	}
+
+	// update leaderboard on memory
+	var leaderboard *resources.Leaderboard
+	idToLeaderBoardServer.Get(LeaderBoardServerKey, leaderboard)
+	for _, v := range leaderboard.Teams {
+		if v.Team.Id == job.TeamID {
+			v.LatestScore.Score = result.Score
+			v.LatestScore.MarkedAt = result.MarkedAt
+			v.BestScore.Score = int64(math.Max(float64(result.Score), float64(v.BestScore.Score)))
+			break
+		}
+	}
+	for _, v := range leaderboard.GeneralTeams {
+		if v.Team.Id == job.TeamID {
+			v.LatestScore.Score = result.Score
+			v.LatestScore.MarkedAt = result.MarkedAt
+			v.BestScore.Score = int64(math.Max(float64(result.Score), float64(v.BestScore.Score)))
+			break
+		}
+	}
+	for _, v := range leaderboard.StudentTeams {
+		if v.Team.Id == job.TeamID {
+			v.LatestScore.Score = result.Score
+			v.LatestScore.MarkedAt = result.MarkedAt
+			v.BestScore.Score = int64(math.Max(float64(result.Score), float64(v.BestScore.Score)))
+			break
+		}
+	}
+	idToLeaderBoardServer.Set(LeaderBoardServerKey, leaderboard)
+
 	return nil
 }
 
