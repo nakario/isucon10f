@@ -207,7 +207,10 @@ func run() error {
 		fmt.Printf("Sending web push: push_subscription=%v\n", string(jsonBytes))
 		err = SendWebPush(vapidKey, notificationPB, &subscription)
 		if err != nil {
-			return fmt.Errorf("send webpush: %w", err)
+			err = SendWebPush(vapidKey, notificationPB, &subscription)
+			if err != nil {
+				return fmt.Errorf("send webpush: %w", err)
+			}
 		}
 	}
 	fmt.Println("Finished")
