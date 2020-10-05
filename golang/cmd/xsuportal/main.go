@@ -1072,6 +1072,17 @@ func (*RegistrationService) DeleteRegistration(e echo.Context) error {
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit tx: %w", err)
 	}
+	leaderboard := &resources.Leaderboard{}
+	newTeams := []*resourcespb.Leaderboard_LeaderboardItem{}
+	ok := idToLeaderBoardServer.Get(LeaderBoardServerKey, leaderboard)
+	if ok {
+		for _, v := range leaderboard.Teams {
+			if v.Team.Id != team.ID {
+				newTeams = append(newTeams, v)
+			}
+		}
+		leaderboard.Teams = newTeams
+	}
 	return writeProto(e, http.StatusOK, &registrationpb.DeleteRegistrationResponse{})
 }
 
