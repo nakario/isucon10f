@@ -602,8 +602,10 @@ func (*ContestantService) Dashboard(e echo.Context) error {
 		if err != nil {
 			return fmt.Errorf("make leaderboard: %w", err)
 		}
-		fmt.Println("leaderboard on memory")
-		idToLeaderBoardServer.Set(LeaderBoardServerKey, *leaderboardPtr)
+		if leaderboardPtr.Contest.ContestStartsAt.AsTime().After(time.Now()) {
+			fmt.Println("leaderboard on memory")
+			idToLeaderBoardServer.Set(LeaderBoardServerKey, *leaderboardPtr)
+		}
 		leaderboard = leaderboardPtr
 	}
 	return writeProto(e, http.StatusOK, &contestantpb.DashboardResponse{
