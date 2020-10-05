@@ -588,15 +588,37 @@ func (*ContestantService) Dashboard(e echo.Context) error {
 	if idToLeaderBoardServer.Exists(LeaderBoardServerKey) {
 		idToLeaderBoardServer.Get(LeaderBoardServerKey, leaderboard)
 		sort.SliceStable(leaderboard.Teams, func(i, j int) bool {
-			return leaderboard.Teams[i].LatestScore.Score > leaderboard.Teams[j].LatestScore.Score
+			if leaderboard.Teams[i].LatestScore.Score > leaderboard.Teams[j].LatestScore.Score {
+				return true
+			} else if leaderboard.Teams[i].LatestScore.Score == leaderboard.Teams[j].LatestScore.Score {
+				return leaderboard.Teams[i].LatestScore.MarkedAt.AsTime().Before(leaderboard.Teams[j].LatestScore.MarkedAt.AsTime())
+			} else {
+				return false
+			}
 		})
 		sort.SliceStable(leaderboard.GeneralTeams, func(i, j int) bool {
-			return leaderboard.GeneralTeams[i].LatestScore.Score > leaderboard.GeneralTeams[j].LatestScore.Score
+			if leaderboard.GeneralTeams[i].LatestScore.Score > leaderboard.GeneralTeams[j].LatestScore.Score {
+				return true
+			} else if leaderboard.GeneralTeams[i].LatestScore.Score == leaderboard.GeneralTeams[j].LatestScore.Score {
+				return leaderboard.GeneralTeams[i].LatestScore.MarkedAt.AsTime().Before(leaderboard.GeneralTeams[j].LatestScore.MarkedAt.AsTime())
+			} else {
+				return false
+			}
 		})
 		sort.SliceStable(leaderboard.StudentTeams, func(i, j int) bool {
-			return leaderboard.StudentTeams[i].LatestScore.Score > leaderboard.StudentTeams[j].LatestScore.Score
+			if leaderboard.StudentTeams[i].LatestScore.Score > leaderboard.StudentTeams[j].LatestScore.Score {
+				return true
+			} else if leaderboard.StudentTeams[i].LatestScore.Score == leaderboard.StudentTeams[j].LatestScore.Score {
+				return leaderboard.StudentTeams[i].LatestScore.MarkedAt.AsTime().Before(leaderboard.StudentTeams[j].LatestScore.MarkedAt.AsTime())
+			} else {
+				return false
+			}
 		})
 		tmp, _ := makeLeaderboardPB(team.ID)
+		fmt.Println("team id: ", team.ID)
+		for _, v := range tmp.Teams {
+			fmt.Print(v, " ")
+		}
 		fmt.Println(len(leaderboard.Teams) == len(tmp.Teams))
 		fmt.Println("leaderboard from memory")
 	} else {
