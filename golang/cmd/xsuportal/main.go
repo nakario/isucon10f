@@ -593,7 +593,8 @@ func (*ContestantService) Dashboard(e echo.Context) error {
 			return fmt.Errorf("make leaderboard: %w", err)
 		}
 		fmt.Println("leaderboard on memory")
-		idToLeaderBoardServer.Set(LeaderBoardServerKey, leaderboard)
+		fmt.Println(leaderboard)
+		idToLeaderBoardServer.Set(LeaderBoardServerKey, *leaderboard)
 	}
 	return writeProto(e, http.StatusOK, &contestantpb.DashboardResponse{
 		Leaderboard: leaderboard,
