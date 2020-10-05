@@ -114,7 +114,7 @@ func (n *Notifier) bulkNotify(db sqlx.Ext, notificationPBs map[string]*resources
 			return nil, fmt.Errorf("marshal notification: %w", err)
 		}
 		encodedMessage := base64.StdEncoding.EncodeToString(m)
-		values += fmt.Sprintf("(%s, %s, TRUE, NOW(6), NOW(6)),", i, encodedMessage)
+		values += fmt.Sprintf("('%s', '%s', TRUE, NOW(6), NOW(6)),", i, encodedMessage)
 	}
 	values = values[:len(values)-1]
 	query := "INSERT INTO `notifications` (`contestant_id`, `encoded_message`, `read`, `created_at`, `updated_at`) VALUES " + values
