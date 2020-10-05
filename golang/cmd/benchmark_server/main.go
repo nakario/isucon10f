@@ -21,6 +21,7 @@ import (
 
 	xsuportal "github.com/isucon/isucon10-final/webapp/golang"
 	"github.com/isucon/isucon10-final/webapp/golang/proto/xsuportal/resources"
+	resourcespb "github.com/isucon/isucon10-final/webapp/golang/proto/xsuportal/resources"
 	"github.com/isucon/isucon10-final/webapp/golang/proto/xsuportal/services/bench"
 	"github.com/isucon/isucon10-final/webapp/golang/util"
 )
@@ -199,6 +200,13 @@ func (b *benchmarkReportService) ReportBenchmarkResult(srv bench.BenchmarkReport
 	}
 }
 
+func toTimestamp(t sql.NullTime) *timestamppb.Timestamp {
+	if t.Valid {
+		return timestamppb.New(t.Time)
+	}
+	return nil
+}
+
 func (b *benchmarkReportService) saveAsFinished(db sqlx.Execer, job *xsuportal.BenchmarkJob, req *bench.ReportBenchmarkResultRequest) error {
 	if !job.StartedAt.Valid || job.FinishedAt.Valid {
 		return status.Errorf(codes.FailedPrecondition, "Job %v has already finished or has not started yet", req.JobId)
@@ -242,9 +250,26 @@ func (b *benchmarkReportService) saveAsFinished(db sqlx.Execer, job *xsuportal.B
 		}
 		for _, v := range leaderboard.Teams {
 			if v.Team.Id == job.TeamID {
+				v.Scores = append(v.Scores, &resources.Leaderboard_LeaderboardItem_LeaderboardScore{
+					Score:     result.Score,
+					StartedAt: toTimestamp(job.StartedAt),
+					MarkedAt:  result.MarkedAt,
+				})
+				if v.BestScore.Score <= result.Score {
+					v.BestScore = &resourcespb.Leaderboard_LeaderboardItem_LeaderboardScore{
+						Score:     int64(math.Max(float64(result.Score), float64(v.BestScore.Score))),
+						StartedAt: toTimestamp(job.StartedAt),
+						MarkedAt:  result.MarkedAt,
+					}
+				}
+				v.LatestScore = &resourcespb.Leaderboard_LeaderboardItem_LeaderboardScore{
+					Score:     result.Score,
+					StartedAt: toTimestamp(job.StartedAt),
+					MarkedAt:  result.MarkedAt,
+				}
+				v.FinishCount = v.FinishCount + 1
 				v.LatestScore.Score = result.Score
 				v.LatestScore.MarkedAt = result.MarkedAt
-				v.BestScore.Score = int64(math.Max(float64(result.Score), float64(v.BestScore.Score)))
 				break
 			}
 		}
