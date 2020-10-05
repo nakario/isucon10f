@@ -594,7 +594,6 @@ func (*ContestantService) Dashboard(e echo.Context) error {
 				return leaderboard.Teams[i].LatestScore.Score > leaderboard.Teams[j].LatestScore.Score
 			}
 		})
-		fmt.Println(leaderboard)
 		fmt.Println("leaderboard from memory")
 	} else {
 		leaderboardPtr, err := makeLeaderboardPB(team.ID)
