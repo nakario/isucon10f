@@ -614,12 +614,12 @@ func (*ContestantService) Dashboard(e echo.Context) error {
 				return false
 			}
 		})
-		tmp, _ := makeLeaderboardPB(team.ID)
-		fmt.Println("team id: ", team.ID)
-		for _, v := range tmp.Teams {
-			fmt.Print(v, " ")
-		}
-		fmt.Println(len(leaderboard.Teams) == len(tmp.Teams))
+		// tmp, _ := makeLeaderboardPB(team.ID)
+		// fmt.Println("team id: ", team.ID)
+		// for _, v := range tmp.Teams {
+		// 	fmt.Print(v, " ")
+		// }
+		// fmt.Println(len(leaderboard.Teams) == len(tmp.Teams))
 		fmt.Println("leaderboard from memory")
 	} else {
 		leaderboardPtr, err := makeLeaderboardPB(team.ID)
