@@ -253,19 +253,19 @@ func (b *benchmarkReportService) saveAsFinished(db sqlx.Execer, job *xsuportal.B
 				v.Scores = append(v.Scores, &resources.Leaderboard_LeaderboardItem_LeaderboardScore{
 					Score:     result.GetScore(),
 					StartedAt: toTimestamp(job.StartedAt),
-					MarkedAt:  toTimestamp(job.FinishedAt),
+					MarkedAt:  result.MarkedAt,
 				})
 				if v.BestScore.Score <= result.Score {
 					v.BestScore = &resourcespb.Leaderboard_LeaderboardItem_LeaderboardScore{
 						Score:     result.GetScore(),
 						StartedAt: toTimestamp(job.StartedAt),
-						MarkedAt:  toTimestamp(job.FinishedAt),
+						MarkedAt:  result.MarkedAt,
 					}
 				}
 				v.LatestScore = &resourcespb.Leaderboard_LeaderboardItem_LeaderboardScore{
 					Score:     result.GetScore(),
 					StartedAt: toTimestamp(job.StartedAt),
-					MarkedAt:  toTimestamp(job.FinishedAt),
+					MarkedAt:  result.MarkedAt,
 				}
 				v.FinishCount = v.FinishCount + 1
 				break
@@ -299,19 +299,19 @@ func (b *benchmarkReportService) saveAsFinished(db sqlx.Execer, job *xsuportal.B
 				v.Scores = append(v.Scores, &resources.Leaderboard_LeaderboardItem_LeaderboardScore{
 					Score:     result.GetScore(),
 					StartedAt: toTimestamp(job.StartedAt),
-					MarkedAt:  toTimestamp(job.FinishedAt),
+					MarkedAt:  result.MarkedAt,
 				})
 				if v.BestScore.Score <= result.Score {
 					v.BestScore = &resourcespb.Leaderboard_LeaderboardItem_LeaderboardScore{
 						Score:     result.GetScore(),
 						StartedAt: toTimestamp(job.StartedAt),
-						MarkedAt:  toTimestamp(job.FinishedAt),
+						MarkedAt:  result.MarkedAt,
 					}
 				}
 				v.LatestScore = &resourcespb.Leaderboard_LeaderboardItem_LeaderboardScore{
 					Score:     result.GetScore(),
 					StartedAt: toTimestamp(job.StartedAt),
-					MarkedAt:  toTimestamp(job.FinishedAt),
+					MarkedAt:  result.MarkedAt,
 				}
 				v.FinishCount = v.FinishCount + 1
 				break
