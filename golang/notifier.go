@@ -148,17 +148,13 @@ func (n *Notifier) bulkNotify(db sqlx.Ext, notificationPBs map[string]*resources
 			return nil, fmt.Errorf("get push subscriptions: %w", err)
 		}
 
-		go func(a *resources.Notification) {
-			for i := 0; i < 3; i++ {
-				for _, subscription := range subscriptions {
-					err = n.SendWebPush(a, &subscription)
-					if err != nil {
-						log.Println("send webpush(bulk): ", err)
-					}
-				}
-				time.Sleep(100 * time.Millisecond)
+		for _, subscription := range subscriptions {
+			err = n.SendWebPush(v, &subscription)
+			if err != nil {
+				log.Println("send webpush(bulk): ", err)
+				db.Exec("UPDATE `notifications` SET `read` = FALSE where id = ?", v.Id)
 			}
-		}(v)
+		}
 
 	}
 	return nil, nil
