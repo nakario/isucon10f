@@ -217,6 +217,8 @@ func (*AdminService) Initialize(e echo.Context) error {
 			Port: int64(port),
 		},
 	}
+
+	idToLeaderBoardServer.FlushAll()
 	return writeProto(e, http.StatusOK, res)
 }
 
