@@ -585,9 +585,11 @@ func (*ContestantService) Dashboard(e echo.Context) error {
 	contestFinished := contestStatus.Status == resourcespb.Contest_FINISHED
 	contestFreezesAt := contestStatus.ContestFreezesAt
 	if contestFinished || time.Now().Before(contestFreezesAt) {
+		fmt.Println("koko")
 		var tmpFinishedJobCount int
 		db.Get(&tmpFinishedJobCount, "SELECT count(*) from benchmark_jobs where finished_at IS NOT NULL")
 		if tmpFinishedJobCount == finishedJobCount && leaderboardCache != nil {
+			fmt.Println("success cache!")
 			return writeProto(e, http.StatusOK, &contestantpb.DashboardResponse{
 				Leaderboard: leaderboardCache,
 			})
