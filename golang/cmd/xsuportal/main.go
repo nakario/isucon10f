@@ -13,6 +13,7 @@ import (
 	"log"
 	"net/http"
 	_ "net/http/pprof"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -586,6 +587,13 @@ func (*ContestantService) Dashboard(e echo.Context) error {
 	var leaderboard *resourcespb.Leaderboard = &resourcespb.Leaderboard{}
 	if idToLeaderBoardServer.Exists(LeaderBoardServerKey) {
 		idToLeaderBoardServer.Get(LeaderBoardServerKey, leaderboard)
+		sort.SliceStable(leaderboard.Teams, func(i, j int) bool {
+			if leaderboard.Teams[i].Team.Id == team.ID {
+				return true
+			} else {
+				return leaderboard.Teams[i].LatestScore.Score > leaderboard.Teams[j].LatestScore.Score
+			}
+		})
 		fmt.Println(leaderboard)
 		fmt.Println("leaderboard from memory")
 	} else {
