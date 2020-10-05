@@ -896,7 +896,7 @@ func (*RegistrationService) CreateTeam(e echo.Context) error {
 		return fmt.Errorf("update contestant: %w", err)
 	}
 
-	ok, err := contestStatusRestricted(e, db, resourcespb.Contest_REGISTRATION, "チーム登録期間ではありません")
+	ok, err = contestStatusRestricted(e, db, resourcespb.Contest_REGISTRATION, "チーム登録期間ではありません")
 	if !ok {
 		return wrapError("check contest status", err)
 	}
