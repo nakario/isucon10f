@@ -7,7 +7,6 @@ import (
 	"encoding/base64"
 	"fmt"
 	"log"
-	"math"
 	"net"
 	"net/http"
 	_ "net/http/pprof"
@@ -248,22 +247,23 @@ func (b *benchmarkReportService) saveAsFinished(db sqlx.Execer, job *xsuportal.B
 			fmt.Println("not ok")
 			return nil
 		}
+		score := int64(raw.Int32 - deduction.Int32)
 		for _, v := range leaderboard.Teams {
 			if v.Team.Id == job.TeamID {
 				v.Scores = append(v.Scores, &resources.Leaderboard_LeaderboardItem_LeaderboardScore{
-					Score:     result.GetScore(),
+					Score:     score,
 					StartedAt: toTimestamp(job.StartedAt),
 					MarkedAt:  result.MarkedAt,
 				})
-				if v.BestScore.Score <= result.Score {
+				if v.BestScore.Score <= score {
 					v.BestScore = &resourcespb.Leaderboard_LeaderboardItem_LeaderboardScore{
-						Score:     result.GetScore(),
+						Score:     score,
 						StartedAt: toTimestamp(job.StartedAt),
 						MarkedAt:  result.MarkedAt,
 					}
 				}
 				v.LatestScore = &resourcespb.Leaderboard_LeaderboardItem_LeaderboardScore{
-					Score:     result.GetScore(),
+					Score:     score,
 					StartedAt: toTimestamp(job.StartedAt),
 					MarkedAt:  result.MarkedAt,
 				}
@@ -274,19 +274,19 @@ func (b *benchmarkReportService) saveAsFinished(db sqlx.Execer, job *xsuportal.B
 		for _, v := range leaderboard.GeneralTeams {
 			if v.Team.Id == job.TeamID {
 				v.Scores = append(v.Scores, &resources.Leaderboard_LeaderboardItem_LeaderboardScore{
-					Score:     result.Score,
+					Score:     score,
 					StartedAt: toTimestamp(job.StartedAt),
 					MarkedAt:  result.MarkedAt,
 				})
-				if v.BestScore.Score <= result.Score {
+				if v.BestScore.Score <= score {
 					v.BestScore = &resourcespb.Leaderboard_LeaderboardItem_LeaderboardScore{
-						Score:     int64(math.Max(float64(result.Score), float64(v.BestScore.Score))),
+						Score:     score,
 						StartedAt: toTimestamp(job.StartedAt),
 						MarkedAt:  result.MarkedAt,
 					}
 				}
 				v.LatestScore = &resourcespb.Leaderboard_LeaderboardItem_LeaderboardScore{
-					Score:     result.Score,
+					Score:     score,
 					StartedAt: toTimestamp(job.StartedAt),
 					MarkedAt:  result.MarkedAt,
 				}
@@ -297,19 +297,19 @@ func (b *benchmarkReportService) saveAsFinished(db sqlx.Execer, job *xsuportal.B
 		for _, v := range leaderboard.StudentTeams {
 			if v.Team.Id == job.TeamID {
 				v.Scores = append(v.Scores, &resources.Leaderboard_LeaderboardItem_LeaderboardScore{
-					Score:     result.GetScore(),
+					Score:     score,
 					StartedAt: toTimestamp(job.StartedAt),
 					MarkedAt:  result.MarkedAt,
 				})
-				if v.BestScore.Score <= result.Score {
+				if v.BestScore.Score <= score {
 					v.BestScore = &resourcespb.Leaderboard_LeaderboardItem_LeaderboardScore{
-						Score:     result.GetScore(),
+						Score:     score,
 						StartedAt: toTimestamp(job.StartedAt),
 						MarkedAt:  result.MarkedAt,
 					}
 				}
 				v.LatestScore = &resourcespb.Leaderboard_LeaderboardItem_LeaderboardScore{
-					Score:     result.GetScore(),
+					Score:     score,
 					StartedAt: toTimestamp(job.StartedAt),
 					MarkedAt:  result.MarkedAt,
 				}
