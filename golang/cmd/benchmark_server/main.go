@@ -235,6 +235,9 @@ func (b *benchmarkReportService) saveAsFinished(db sqlx.Execer, job *xsuportal.B
 	if idToLeaderBoardServer.Exists(LeaderBoardServerKey) {
 
 		idToLeaderBoardServer.Get(LeaderBoardServerKey, leaderboard)
+		if leaderboard == nil {
+			return nil
+		}
 		for _, v := range leaderboard.Teams {
 			if v.Team.Id == job.TeamID {
 				v.LatestScore.Score = result.Score
