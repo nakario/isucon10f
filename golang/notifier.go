@@ -9,12 +9,15 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"net/http"
+	"os"
 	"sync"
 	"time"
 
 	"github.com/SherClockHolmes/webpush-go"
 	"github.com/golang/protobuf/proto"
 	"github.com/jmoiron/sqlx"
+	lhl "github.com/nakario/loghttp-ltsv"
 	"golang.org/x/sync/singleflight"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -25,6 +28,21 @@ const (
 	WebpushVAPIDPrivateKeyPath = "../vapid_private.pem"
 	WebpushSubject             = "xsuportal@example.com"
 )
+
+var client *http.Client
+
+func init() {
+	logf, err := os.OpenFile("/home/isucon/client.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
+	if err != nil {
+		log.Fatal(err)
+	}
+	client = &http.Client{
+		Transport: lhl.NewTransport(logf),
+	}
+	http.DefaultTransport.(*http.Transport).MaxConnsPerHost = 500
+	http.DefaultTransport.(*http.Transport).MaxIdleConns = 500
+	http.DefaultTransport.(*http.Transport).MaxIdleConnsPerHost = 500
+}
 
 type Notifier struct {
 	mu      sync.Mutex
@@ -167,6 +185,7 @@ func (n *Notifier) SendWebPush(notificationPB *resources.Notification, pushSubsc
 			Subscriber:      WebpushSubject,
 			VAPIDPublicKey:  vapidPublicKey,
 			VAPIDPrivateKey: vapidPrivateKey,
+			HTTPClient: client,
 		},
 	)
 	if err != nil {
