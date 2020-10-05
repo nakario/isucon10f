@@ -257,6 +257,7 @@ func (b *benchmarkReportService) saveAsFinished(db sqlx.Execer, job *xsuportal.B
 			break
 		}
 	}
+	fmt.Println("update leaderboard on memory")
 	idToLeaderBoardServer.Set(LeaderBoardServerKey, leaderboard)
 
 	return nil

@@ -584,11 +584,13 @@ func (*ContestantService) Dashboard(e echo.Context) error {
 	var leaderboard *resourcespb.Leaderboard
 	if idToLeaderBoardServer.Exists(LeaderBoardServerKey) {
 		idToLeaderBoardServer.Get(LeaderBoardServerKey, leaderboard)
+		fmt.Println("leaderboard from memory")
 	} else {
 		leaderboard, err := makeLeaderboardPB(team.ID)
 		if err != nil {
 			return fmt.Errorf("make leaderboard: %w", err)
 		}
+		fmt.Println("leaderboard on memory")
 		idToLeaderBoardServer.Set(LeaderBoardServerKey, leaderboard)
 	}
 	return writeProto(e, http.StatusOK, &contestantpb.DashboardResponse{
