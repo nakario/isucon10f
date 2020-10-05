@@ -232,34 +232,37 @@ func (b *benchmarkReportService) saveAsFinished(db sqlx.Execer, job *xsuportal.B
 
 	// update leaderboard on memory
 	var leaderboard *resources.Leaderboard
-	idToLeaderBoardServer.Get(LeaderBoardServerKey, leaderboard)
-	for _, v := range leaderboard.Teams {
-		if v.Team.Id == job.TeamID {
-			v.LatestScore.Score = result.Score
-			v.LatestScore.MarkedAt = result.MarkedAt
-			v.BestScore.Score = int64(math.Max(float64(result.Score), float64(v.BestScore.Score)))
-			break
-		}
-	}
-	for _, v := range leaderboard.GeneralTeams {
-		if v.Team.Id == job.TeamID {
-			v.LatestScore.Score = result.Score
-			v.LatestScore.MarkedAt = result.MarkedAt
-			v.BestScore.Score = int64(math.Max(float64(result.Score), float64(v.BestScore.Score)))
-			break
-		}
-	}
-	for _, v := range leaderboard.StudentTeams {
-		if v.Team.Id == job.TeamID {
-			v.LatestScore.Score = result.Score
-			v.LatestScore.MarkedAt = result.MarkedAt
-			v.BestScore.Score = int64(math.Max(float64(result.Score), float64(v.BestScore.Score)))
-			break
-		}
-	}
-	fmt.Println("update leaderboard on memory")
-	idToLeaderBoardServer.Set(LeaderBoardServerKey, leaderboard)
+	if idToLeaderBoardServer.Exists(LeaderBoardServerKey) {
 
+		idToLeaderBoardServer.Get(LeaderBoardServerKey, leaderboard)
+		for _, v := range leaderboard.Teams {
+			if v.Team.Id == job.TeamID {
+				v.LatestScore.Score = result.Score
+				v.LatestScore.MarkedAt = result.MarkedAt
+				v.BestScore.Score = int64(math.Max(float64(result.Score), float64(v.BestScore.Score)))
+				break
+			}
+		}
+		for _, v := range leaderboard.GeneralTeams {
+			if v.Team.Id == job.TeamID {
+				v.LatestScore.Score = result.Score
+				v.LatestScore.MarkedAt = result.MarkedAt
+				v.BestScore.Score = int64(math.Max(float64(result.Score), float64(v.BestScore.Score)))
+				break
+			}
+		}
+		for _, v := range leaderboard.StudentTeams {
+			if v.Team.Id == job.TeamID {
+				v.LatestScore.Score = result.Score
+				v.LatestScore.MarkedAt = result.MarkedAt
+				v.BestScore.Score = int64(math.Max(float64(result.Score), float64(v.BestScore.Score)))
+				break
+			}
+		}
+		fmt.Println("update leaderboard on memory")
+		idToLeaderBoardServer.Set(LeaderBoardServerKey, leaderboard)
+
+	}
 	return nil
 }
 
