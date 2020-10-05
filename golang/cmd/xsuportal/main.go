@@ -50,6 +50,7 @@ const (
 
 var db *sqlx.DB
 var notifier xsuportal.Notifier
+var contestantIdMap map[string]string = make(map[string]string, 300)
 
 func main() {
 	go func() { log.Println(http.ListenAndServe(":9090", nil)) }()
@@ -768,6 +769,8 @@ func (*ContestantService) Logout(e echo.Context) error {
 		if err := sess.Save(e.Request(), e.Response()); err != nil {
 			return fmt.Errorf("delete session: %w", err)
 		}
+		cookie, _ := e.Cookie(SessionName)
+		delete(contestantIdMap, cookie.Value)
 	} else {
 		return halt(e, http.StatusUnauthorized, "ログインしていません", nil)
 	}
@@ -1091,6 +1094,8 @@ func (*RegistrationService) DeleteRegistration(e echo.Context) error {
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit tx: %w", err)
 	}
+	cookie, _ := e.Cookie(SessionName)
+	delete(contestantIdMap, cookie.Value)
 	return writeProto(e, http.StatusOK, &registrationpb.DeleteRegistrationResponse{})
 }
 
@@ -1236,6 +1241,15 @@ type loginRequiredOption struct {
 }
 
 func loginRequired(e echo.Context, db sqlx.Queryer, option *loginRequiredOption) (bool, error) {
+	cookie, err := e.Cookie(SessionName)
+	if err != nil {
+		return false, halt(e, http.StatusUnauthorized, "ログインが必要です", nil)
+	}
+	if !option.Lock {
+		if _, ok := contestantIdMap[cookie.Value]; ok {
+			return true, nil
+		}
+	}
 	contestant, err := getCurrentContestant(e, db, option.Lock)
 	if err != nil {
 		return false, fmt.Errorf("current contestant: %w", err)
@@ -1243,6 +1257,7 @@ func loginRequired(e echo.Context, db sqlx.Queryer, option *loginRequiredOption)
 	if contestant == nil {
 		return false, halt(e, http.StatusUnauthorized, "ログインが必要です", nil)
 	}
+
 	if option.Team {
 		t, err := getCurrentTeam(e, db, option.Lock)
 		if err != nil {
@@ -1252,6 +1267,7 @@ func loginRequired(e echo.Context, db sqlx.Queryer, option *loginRequiredOption)
 			return false, halt(e, http.StatusForbidden, "参加登録が必要です", nil)
 		}
 	}
+	contestantIdMap[cookie.Value] = contestant.ID
 	return true, nil
 }
 
