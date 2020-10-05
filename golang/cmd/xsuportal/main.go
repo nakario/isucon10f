@@ -596,6 +596,8 @@ func (*ContestantService) Dashboard(e echo.Context) error {
 		sort.SliceStable(leaderboard.StudentTeams, func(i, j int) bool {
 			return leaderboard.StudentTeams[i].LatestScore.Score > leaderboard.StudentTeams[j].LatestScore.Score
 		})
+		tmp, _ := makeLeaderboardPB(team.ID)
+		fmt.Println(len(leaderboard.Teams) == len(tmp.Teams))
 		fmt.Println("leaderboard from memory")
 	} else {
 		leaderboardPtr, err := makeLeaderboardPB(team.ID)
