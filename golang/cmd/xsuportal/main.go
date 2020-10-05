@@ -603,7 +603,7 @@ func (*ContestantService) Dashboard(e echo.Context) error {
 			return fmt.Errorf("make leaderboard: %w", err)
 		}
 		contestStatus, err := getCurrentContestStatus(db)
-		if contestStatus.ContestStartsAt.After(time.Now()) {
+		if contestStatus.ContestStartsAt.Before(time.Now()) {
 			fmt.Println("leaderboard on memory")
 			idToLeaderBoardServer.Set(LeaderBoardServerKey, *leaderboardPtr)
 		}
