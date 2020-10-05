@@ -588,11 +588,13 @@ func (*ContestantService) Dashboard(e echo.Context) error {
 	if idToLeaderBoardServer.Exists(LeaderBoardServerKey) {
 		idToLeaderBoardServer.Get(LeaderBoardServerKey, leaderboard)
 		sort.SliceStable(leaderboard.Teams, func(i, j int) bool {
-			if leaderboard.Teams[i].Team.Id == team.ID || leaderboard.Teams[j].Team.Id == team.ID {
-				return true
-			} else {
-				return leaderboard.Teams[i].LatestScore.Score > leaderboard.Teams[j].LatestScore.Score
-			}
+			return leaderboard.Teams[i].LatestScore.Score > leaderboard.Teams[j].LatestScore.Score
+		})
+		sort.SliceStable(leaderboard.GeneralTeams, func(i, j int) bool {
+			return leaderboard.Teams[i].LatestScore.Score > leaderboard.Teams[j].LatestScore.Score
+		})
+		sort.SliceStable(leaderboard.StudentTeams, func(i, j int) bool {
+			return leaderboard.Teams[i].LatestScore.Score > leaderboard.Teams[j].LatestScore.Score
 		})
 		fmt.Println("leaderboard from memory")
 	} else {
