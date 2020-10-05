@@ -177,20 +177,12 @@ func (*AdminService) Initialize(e echo.Context) error {
 	}
 
 	if req.Contest != nil {
-		freezesAt := req.Contest.ContestFreezesAt.AsTime().Round(time.Microsecond)
-		endsAt := req.Contest.ContestEndsAt.AsTime().Round(time.Microsecond)
-		go func(){
-			<-time.After(freezesAt.Sub(time.Now()))
-			freezeCh <- struct{}{}
-			<-time.After(endsAt.Sub(time.Now()))
-			endCh <- struct{}{}
-		}()
 		_, err := db.Exec(
 			"INSERT `contest_config` (`registration_open_at`, `contest_starts_at`, `contest_freezes_at`, `contest_ends_at`) VALUES (?, ?, ?, ?)",
 			req.Contest.RegistrationOpenAt.AsTime().Round(time.Microsecond),
 			req.Contest.ContestStartsAt.AsTime().Round(time.Microsecond),
-			freezesAt,
-			endsAt,
+			req.Contest.ContestFreezesAt.AsTime().Round(time.Microsecond),
+			req.Contest.ContestEndsAt.AsTime().Round(time.Microsecond),
 		)
 		if err != nil {
 			return fmt.Errorf("insert contest: %w", err)
@@ -1339,8 +1331,6 @@ func makeContestPB(e echo.Context) (*resourcespb.Contest, error) {
 }
 
 var publicLeaderboardGroup = &singleflight.Group{}
-var freezeCh = make(chan struct{}, 10)
-var endCh = make(chan struct{}, 10)
 
 func resetPublicLeaderboardCacheEvery(d time.Duration) {
 	ticker := time.NewTicker(d)
@@ -1348,8 +1338,6 @@ func resetPublicLeaderboardCacheEvery(d time.Duration) {
 		select {
 		case <-ticker.C:
 			publicLeaderboardGroup.Forget("0")
-		case <-freezeCh:
-			<-endCh
 		}
 	}
 }
