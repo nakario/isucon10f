@@ -268,24 +268,52 @@ func (b *benchmarkReportService) saveAsFinished(db sqlx.Execer, job *xsuportal.B
 					MarkedAt:  result.MarkedAt,
 				}
 				v.FinishCount = v.FinishCount + 1
-				v.LatestScore.Score = result.Score
-				v.LatestScore.MarkedAt = result.MarkedAt
 				break
 			}
 		}
 		for _, v := range leaderboard.GeneralTeams {
 			if v.Team.Id == job.TeamID {
-				v.LatestScore.Score = result.Score
-				v.LatestScore.MarkedAt = result.MarkedAt
-				v.BestScore.Score = int64(math.Max(float64(result.Score), float64(v.BestScore.Score)))
+				v.Scores = append(v.Scores, &resources.Leaderboard_LeaderboardItem_LeaderboardScore{
+					Score:     result.Score,
+					StartedAt: toTimestamp(job.StartedAt),
+					MarkedAt:  result.MarkedAt,
+				})
+				if v.BestScore.Score <= result.Score {
+					v.BestScore = &resourcespb.Leaderboard_LeaderboardItem_LeaderboardScore{
+						Score:     int64(math.Max(float64(result.Score), float64(v.BestScore.Score))),
+						StartedAt: toTimestamp(job.StartedAt),
+						MarkedAt:  result.MarkedAt,
+					}
+				}
+				v.LatestScore = &resourcespb.Leaderboard_LeaderboardItem_LeaderboardScore{
+					Score:     result.Score,
+					StartedAt: toTimestamp(job.StartedAt),
+					MarkedAt:  result.MarkedAt,
+				}
+				v.FinishCount = v.FinishCount + 1
 				break
 			}
 		}
 		for _, v := range leaderboard.StudentTeams {
 			if v.Team.Id == job.TeamID {
-				v.LatestScore.Score = result.Score
-				v.LatestScore.MarkedAt = result.MarkedAt
-				v.BestScore.Score = int64(math.Max(float64(result.Score), float64(v.BestScore.Score)))
+				v.Scores = append(v.Scores, &resources.Leaderboard_LeaderboardItem_LeaderboardScore{
+					Score:     result.Score,
+					StartedAt: toTimestamp(job.StartedAt),
+					MarkedAt:  result.MarkedAt,
+				})
+				if v.BestScore.Score <= result.Score {
+					v.BestScore = &resourcespb.Leaderboard_LeaderboardItem_LeaderboardScore{
+						Score:     int64(math.Max(float64(result.Score), float64(v.BestScore.Score))),
+						StartedAt: toTimestamp(job.StartedAt),
+						MarkedAt:  result.MarkedAt,
+					}
+				}
+				v.LatestScore = &resourcespb.Leaderboard_LeaderboardItem_LeaderboardScore{
+					Score:     result.Score,
+					StartedAt: toTimestamp(job.StartedAt),
+					MarkedAt:  result.MarkedAt,
+				}
+				v.FinishCount = v.FinishCount + 1
 				break
 			}
 		}
