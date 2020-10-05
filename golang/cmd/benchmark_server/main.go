@@ -232,7 +232,7 @@ func (b *benchmarkReportService) saveAsFinished(db sqlx.Execer, job *xsuportal.B
 
 	// update leaderboard on memory
 	var leaderboard *resources.Leaderboard
-	fmt.Println(idToLeaderBoardServer.server.keyCount)
+	fmt.Println(idToLeaderBoardServer.AllKeys())
 	if idToLeaderBoardServer.Exists(LeaderBoardServerKey) {
 
 		ok := idToLeaderBoardServer.Get(LeaderBoardServerKey, leaderboard)
