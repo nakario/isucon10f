@@ -588,7 +588,7 @@ func (*ContestantService) Dashboard(e echo.Context) error {
 	if idToLeaderBoardServer.Exists(LeaderBoardServerKey) {
 		idToLeaderBoardServer.Get(LeaderBoardServerKey, leaderboard)
 		sort.SliceStable(leaderboard.Teams, func(i, j int) bool {
-			if leaderboard.Teams[i].Team.Id == team.ID {
+			if leaderboard.Teams[i].Team.Id == team.ID || leaderboard.Teams[j].Team.Id == team.ID {
 				return true
 			} else {
 				return leaderboard.Teams[i].LatestScore.Score > leaderboard.Teams[j].LatestScore.Score
