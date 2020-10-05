@@ -318,7 +318,7 @@ func (b *benchmarkReportService) saveAsFinished(db sqlx.Execer, job *xsuportal.B
 			}
 		}
 		fmt.Println("update leaderboard on memory")
-		idToLeaderBoardServer.Set(LeaderBoardServerKey, leaderboard)
+		idToLeaderBoardServer.Set(LeaderBoardServerKey, *leaderboard)
 
 	}
 	return nil
