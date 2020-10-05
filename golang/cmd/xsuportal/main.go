@@ -51,7 +51,7 @@ const (
 var db *sqlx.DB
 var notifier xsuportal.Notifier
 
-const RedisHostPrivateIPAddress = "10.162.10.101"
+const RedisHostPrivateIPAddress = "10.162.10.102"
 const LeaderBoardServerKey = "board"
 
 var isMasterServerIP = MyServerIsOnMasterServerIP()

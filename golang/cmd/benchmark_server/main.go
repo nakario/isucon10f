@@ -27,7 +27,7 @@ import (
 
 var db *sqlx.DB
 
-const RedisHostPrivateIPAddress = "10.162.10.101"
+const RedisHostPrivateIPAddress = "10.162.10.102"
 const LeaderBoardServerKey = "board"
 
 var isMasterServerIP = MyServerIsOnMasterServerIP()
