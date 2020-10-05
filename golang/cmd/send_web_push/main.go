@@ -202,14 +202,16 @@ func run() error {
 	for _, subscription := range subscriptions {
 		jsonBytes, err := json.Marshal(subscription)
 		if err != nil {
-			return fmt.Errorf("subscription to json: %w", err)
+			fmt.Errorf("subscription to json: %w", err)
+			break
 		}
 		fmt.Printf("Sending web push: push_subscription=%v\n", string(jsonBytes))
 		err = SendWebPush(vapidKey, notificationPB, &subscription)
 		if err != nil {
 			err = SendWebPush(vapidKey, notificationPB, &subscription)
 			if err != nil {
-				return fmt.Errorf("send webpush: %w", err)
+				fmt.Errorf("send webpush: %w", err)
+				break
 			}
 		}
 	}
