@@ -118,6 +118,7 @@ func (n *Notifier) bulkNotify(db sqlx.Ext, notificationPBs map[string]*resources
 	}
 	values = values[:len(values)-1]
 	query := "INSERT INTO `notifications` (`contestant_id`, `encoded_message`, `read`, `created_at`, `updated_at`) VALUES " + values
+	fmt.Println(query)
 
 	res, err := db.Exec(
 		query,
