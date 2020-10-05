@@ -358,10 +358,12 @@ func (*AdminService) RespondClarification(e echo.Context) error {
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit tx: %w", err)
 	}
-	updated := wasAnswered && wasDisclosed == clarification.Disclosed
-	if err := notifier.NotifyClarificationAnswered(db, &clarification, updated); err != nil {
-		return fmt.Errorf("notify clarification answered: %w", err)
-	}
+	go func() {
+		updated := wasAnswered && wasDisclosed == clarification.Disclosed
+		if err := notifier.NotifyClarificationAnswered(db, &clarification, updated); err != nil {
+			fmt.Errorf("notify clarification answered: %w", err)
+		}
+	}()
 	return writeProto(e, http.StatusOK, &adminpb.RespondClarificationResponse{
 		Clarification: c,
 	})
