@@ -217,7 +217,7 @@ func (n *Notifier) notify(db sqlx.Ext, notificationPB *resources.Notification, c
 	}
 	encodedMessage := base64.StdEncoding.EncodeToString(m)
 	res, err := db.Exec(
-		"INSERT INTO `notifications` (`contestant_id`, `encoded_message`, `read`, `created_at`, `updated_at`) VALUES (?, ?, TRUE, NOW(6), NOW(6))",
+		"INSERT INTO `notifications` (`contestant_id`, `encoded_message`, `read`, `created_at`, `updated_at`) VALUES (?, ?, FALSE, NOW(6), NOW(6))",
 		contestantID,
 		encodedMessage,
 	)
