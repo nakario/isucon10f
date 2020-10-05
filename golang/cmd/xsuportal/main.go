@@ -591,10 +591,10 @@ func (*ContestantService) Dashboard(e echo.Context) error {
 			return leaderboard.Teams[i].LatestScore.Score > leaderboard.Teams[j].LatestScore.Score
 		})
 		sort.SliceStable(leaderboard.GeneralTeams, func(i, j int) bool {
-			return leaderboard.Teams[i].LatestScore.Score > leaderboard.Teams[j].LatestScore.Score
+			return leaderboard.GeneralTeams[i].LatestScore.Score > leaderboard.GeneralTeams[j].LatestScore.Score
 		})
 		sort.SliceStable(leaderboard.StudentTeams, func(i, j int) bool {
-			return leaderboard.Teams[i].LatestScore.Score > leaderboard.Teams[j].LatestScore.Score
+			return leaderboard.StudentTeams[i].LatestScore.Score > leaderboard.StudentTeams[j].LatestScore.Score
 		})
 		fmt.Println("leaderboard from memory")
 	} else {
