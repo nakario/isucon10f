@@ -569,18 +569,49 @@ func (*ContestantService) RequestClarification(e echo.Context) error {
 	})
 }
 
+var finishedJobCount int = 0
+var leaderboardCache *resourcespb.Leaderboard
+
 func (*ContestantService) Dashboard(e echo.Context) error {
 	if ok, err := loginRequired(e, db, &loginRequiredOption{Team: true}); !ok {
 		return wrapError("check session", err)
 	}
 	team, _ := getCurrentTeam(e, db, false)
-	leaderboard, err := makeLeaderboardPB(team.ID)
+
+	contestStatus, err := getCurrentContestStatus(db)
 	if err != nil {
-		return fmt.Errorf("make leaderboard: %w", err)
+		return fmt.Errorf("get current contest status: %w", err)
 	}
-	return writeProto(e, http.StatusOK, &contestantpb.DashboardResponse{
-		Leaderboard: leaderboard,
-	})
+	contestFinished := contestStatus.Status == resourcespb.Contest_FINISHED
+	contestFreezesAt := contestStatus.ContestFreezesAt
+	if contestFinished || time.Now().Before(contestFreezesAt) {
+		var tmpFinishedJobCount int
+		db.Get(&tmpFinishedJobCount, "SELECT count(*) from benchmark_jobs where finished_at IS NOT NULL")
+		if tmpFinishedJobCount == finishedJobCount && leaderboardCache != nil {
+			return writeProto(e, http.StatusOK, &contestantpb.DashboardResponse{
+				Leaderboard: leaderboardCache,
+			})
+		} else {
+			leaderboard, err := makeLeaderboardPB(team.ID)
+			if err != nil {
+				return fmt.Errorf("make leaderboard: %w", err)
+			}
+			leaderboardCache = leaderboard
+			finishedJobCount = tmpFinishedJobCount
+			return writeProto(e, http.StatusOK, &contestantpb.DashboardResponse{
+				Leaderboard: leaderboard,
+			})
+		}
+	} else {
+		leaderboard, err := makeLeaderboardPB(team.ID)
+		if err != nil {
+			return fmt.Errorf("make leaderboard: %w", err)
+		}
+		return writeProto(e, http.StatusOK, &contestantpb.DashboardResponse{
+			Leaderboard: leaderboard,
+		})
+	}
+
 }
 
 func (*ContestantService) ListNotifications(e echo.Context) error {
