@@ -13,7 +13,6 @@ import (
 	_ "net/http/pprof"
 	"time"
 
-	syncmapserver "github.com/aokabi/go-syncmapserver"
 	"github.com/jmoiron/sqlx"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -31,8 +30,8 @@ var db *sqlx.DB
 const RedisHostPrivateIPAddress = "10.162.10.101"
 const LeaderBoardServerKey = "board"
 
-var isMasterServerIP = syncmapserver.MyServerIsOnMasterServerIP()
-var idToLeaderBoardServer = syncmapserver.NewSyncMapServerConn(syncmapserver.GetMasterServerAddress()+":8884", isMasterServerIP)
+var isMasterServerIP = MyServerIsOnMasterServerIP()
+var idToLeaderBoardServer = NewSyncMapServerConn(GetMasterServerAddress()+":8884", isMasterServerIP)
 
 type benchmarkQueueService struct {
 }

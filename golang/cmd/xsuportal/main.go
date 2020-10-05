@@ -17,7 +17,6 @@ import (
 	"strings"
 	"time"
 
-	syncmapserver "github.com/aokabi/go-syncmapserver"
 	"github.com/go-sql-driver/mysql"
 	"github.com/golang/protobuf/proto"
 	"github.com/gorilla/sessions"
@@ -55,8 +54,8 @@ var notifier xsuportal.Notifier
 const RedisHostPrivateIPAddress = "10.162.10.101"
 const LeaderBoardServerKey = "board"
 
-var isMasterServerIP = syncmapserver.MyServerIsOnMasterServerIP()
-var idToLeaderBoardServer = syncmapserver.NewSyncMapServerConn(syncmapserver.GetMasterServerAddress()+":8884", isMasterServerIP)
+var isMasterServerIP = MyServerIsOnMasterServerIP()
+var idToLeaderBoardServer = NewSyncMapServerConn(GetMasterServerAddress()+":8884", isMasterServerIP)
 
 func main() {
 	go func() { log.Println(http.ListenAndServe(":9090", nil)) }()
