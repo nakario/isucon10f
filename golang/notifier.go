@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/SherClockHolmes/webpush-go"
 	"github.com/golang/protobuf/proto"
@@ -77,11 +78,27 @@ func (n *Notifier) VAPIDKey() *webpush.Options {
 	return n.options
 }
 
+var logger *log.Logger
+
+func init() {
+	logf, err := os.OpenFile("/home/isucon/nca.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
+	if err != nil {
+		log.Fatal(err)
+	}
+	logger = log.New(logf, "", log.Ltime)
+	logger.Print("time\tab\tbc\n")
+}
+
 func (n *Notifier) NotifyClarificationAnswered(db sqlx.Ext, c *Clarification, updated bool) error {
+	var ta, tb, tc time.Time
+	defer func(){
+		logger.Printf("\t%d\t%d\n", tb.Sub(ta).Microseconds(), tc.Sub(tb).Microseconds())
+	}()
 	var contestants []struct {
 		ID     string `db:"id"`
 		TeamID int64  `db:"team_id"`
 	}
+	ta = time.Now()
 	if c.Disclosed.Valid && c.Disclosed.Bool {
 		err := sqlx.Select(
 			db,
@@ -102,6 +119,7 @@ func (n *Notifier) NotifyClarificationAnswered(db sqlx.Ext, c *Clarification, up
 			return fmt.Errorf("select contestants(team_id=%v): %w", c.TeamID, err)
 		}
 	}
+	tb = time.Now()
 	for _, contestant := range contestants {
 		notificationPB := &resources.Notification{
 			Content: &resources.Notification_ContentClarification{
@@ -122,6 +140,7 @@ func (n *Notifier) NotifyClarificationAnswered(db sqlx.Ext, c *Clarification, up
 			// TODO: Web Push IIKANJI NI SHITE
 		}
 	}
+	tc = time.Now()
 	return nil
 }
 
