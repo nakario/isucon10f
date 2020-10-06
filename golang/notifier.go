@@ -95,15 +95,12 @@ func (n *Notifier) NotifyClarificationAnswered(db sqlx.Ext, c *Clarification, up
 				},
 			},
 		}
-		notification, err := n.notify(db, notificationPB, contestant.ID)
-		if err != nil {
-			return fmt.Errorf("notify: %w", err)
-		}
-		if n.VAPIDKey() != nil {
-			notificationPB.Id = notification.ID
-			notificationPB.CreatedAt = timestamppb.New(notification.CreatedAt)
-			// TODO: Web Push IIKANJI NI SHITE
-		}
+		go func(id string) {
+			err := n.notify(db, notificationPB, id)
+			if err != nil {
+				log.Println("notify: ", err)
+			}
+		}(contestant.ID)
 	}
 	return nil
 }
@@ -130,15 +127,12 @@ func (n *Notifier) NotifyBenchmarkJobFinished(db sqlx.Ext, job *BenchmarkJob) er
 				},
 			},
 		}
-		notification, err := n.notify(db, notificationPB, contestant.ID)
-		if err != nil {
-			return fmt.Errorf("notify: %w", err)
-		}
-		if n.VAPIDKey() != nil {
-			notificationPB.Id = notification.ID
-			notificationPB.CreatedAt = timestamppb.New(notification.CreatedAt)
-			// TODO: Web Push IIKANJI NI SHITE
-		}
+		go func(id string) {
+			err := n.notify(db, notificationPB, id)
+			if err != nil {
+				log.Println("notify: ", err)
+			}
+		}(contestant.ID)
 	}
 	return nil
 }
@@ -210,38 +204,31 @@ func getPushSubscriptions(db sqlx.Queryer, contestantID string) ([]PushSubscript
 	return subscriptions, nil
 }
 
-func (n *Notifier) notify(db sqlx.Ext, notificationPB *resources.Notification, contestantID string) (*Notification, error) {
+func (n *Notifier) notify(db sqlx.Ext, notificationPB *resources.Notification, contestantID string) error {
 	m, err := proto.Marshal(notificationPB)
 	if err != nil {
-		return nil, fmt.Errorf("marshal notification: %w", err)
+		return fmt.Errorf("marshal notification: %w", err)
 	}
 	encodedMessage := base64.StdEncoding.EncodeToString(m)
+	now := time.Now().Round(time.Microsecond)
 	res, err := db.Exec(
-		"INSERT INTO `notifications` (`contestant_id`, `encoded_message`, `read`, `created_at`, `updated_at`) VALUES (?, ?, TRUE, NOW(6), NOW(6))",
+		"INSERT INTO `notifications` (`contestant_id`, `encoded_message`, `read`, `created_at`, `updated_at`) VALUES (?, ?, TRUE, ?, ?)",
 		contestantID,
 		encodedMessage,
+		now,
+		now,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("insert notification: %w", err)
+		return fmt.Errorf("insert notification: %w", err)
 	}
 	lastInsertID, _ := res.LastInsertId()
-	var notification Notification
-	err = sqlx.Get(
-		db,
-		&notification,
-		"SELECT * FROM `notifications` WHERE `id` = ? LIMIT 1",
-		lastInsertID,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("get inserted notification: %w", err)
-	}
 
-	notificationPB.Id = notification.ID
-	notificationPB.CreatedAt = timestamppb.New(notification.CreatedAt)
+	notificationPB.Id = lastInsertID
+	notificationPB.CreatedAt = timestamppb.New(now)
 
-	subscriptions, err := getPushSubscriptionsSF(db, contestantID)
+	subscriptions, err := getPushSubscriptions(db, contestantID)
 	if err != nil {
-		return nil, fmt.Errorf("get push subscriptions: %w", err)
+		return fmt.Errorf("get push subscriptions: %w", err)
 	}
 
 	go func() {
@@ -256,5 +243,5 @@ func (n *Notifier) notify(db sqlx.Ext, notificationPB *resources.Notification, c
 		}
 	}()
 
-	return &notification, nil
+	return nil
 }
