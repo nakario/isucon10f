@@ -15,6 +15,7 @@ import (
 	_ "net/http/pprof"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-sql-driver/mysql"
@@ -50,7 +51,7 @@ const (
 
 var db *sqlx.DB
 var notifier xsuportal.Notifier
-var contestantIdMap map[string]string = make(map[string]string, 300)
+var contestantIdMap sync.Map
 
 func main() {
 	go func() { log.Println(http.ListenAndServe(":9090", nil)) }()
@@ -772,7 +773,7 @@ func (*ContestantService) Logout(e echo.Context) error {
 			return fmt.Errorf("delete session: %w", err)
 		}
 		cookie, _ := e.Cookie(SessionName)
-		delete(contestantIdMap, cookie.Value)
+		contestantIdMap.Delete(cookie.Value)
 	} else {
 		return halt(e, http.StatusUnauthorized, "ログインしていません", nil)
 	}
@@ -1097,7 +1098,7 @@ func (*RegistrationService) DeleteRegistration(e echo.Context) error {
 		return fmt.Errorf("commit tx: %w", err)
 	}
 	cookie, _ := e.Cookie(SessionName)
-	delete(contestantIdMap, cookie.Value)
+	contestantIdMap.Delete(cookie.Value)
 	return writeProto(e, http.StatusOK, &registrationpb.DeleteRegistrationResponse{})
 }
 
@@ -1248,7 +1249,7 @@ func loginRequired(e echo.Context, db sqlx.Queryer, option *loginRequiredOption)
 		return false, halt(e, http.StatusUnauthorized, "ログインが必要です", nil)
 	}
 	if !option.Lock {
-		if _, ok := contestantIdMap[cookie.Value]; ok {
+		if _, ok := contestantIdMap.Load(cookie.Value); ok {
 			return true, nil
 		}
 	}
@@ -1269,7 +1270,7 @@ func loginRequired(e echo.Context, db sqlx.Queryer, option *loginRequiredOption)
 			return false, halt(e, http.StatusForbidden, "参加登録が必要です", nil)
 		}
 	}
-	contestantIdMap[cookie.Value] = contestant.ID
+	contestantIdMap.Store(cookie.Value, contestant.ID)
 	return true, nil
 }
 
