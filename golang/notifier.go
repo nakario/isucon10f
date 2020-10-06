@@ -8,7 +8,9 @@ import (
 	"encoding/pem"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"sync"
+	"time"
 
 	"github.com/SherClockHolmes/webpush-go"
 	"github.com/golang/protobuf/proto"
@@ -242,14 +244,17 @@ func (n *Notifier) notify(db sqlx.Ext, notificationPB *resources.Notification, c
 		return nil, fmt.Errorf("get push subscriptions: %w", err)
 	}
 
-	for _, subscription := range subscriptions {
-		err = n.SendWebPush(notificationPB, &subscription)
-		if err != nil {
-			return nil, fmt.Errorf("send webpush: %w", err)
+	go func() {
+		for i := 0; i < 3; i++ {
+			for _, subscription := range subscriptions {
+				err = n.SendWebPush(notificationPB, &subscription)
+				if err != nil {
+					log.Println("send webpush: ", err)
+				}
+			}
+			time.Sleep(100 * time.Millisecond)
 		}
-	}
+	}()
 
 	return &notification, nil
 }
-
-
