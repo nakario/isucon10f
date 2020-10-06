@@ -529,7 +529,7 @@ func (*ContestantService) ListClarifications(e echo.Context) error {
 	teams := make([]xsuportal.Team, 10)
 	err = db.Select(
 		&teams,
-		"SELECT * FROM `teams where id in (?)`",
+		"SELECT * FROM `teams` where id in (?)",
 		teamIds,
 	)
 	if err != nil {
