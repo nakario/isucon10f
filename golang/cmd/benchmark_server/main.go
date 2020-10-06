@@ -38,7 +38,6 @@ func (b *benchmarkQueueService) Svc() *bench.BenchmarkQueueService {
 }
 
 func (b *benchmarkQueueService) ReceiveBenchmarkJob(ctx context.Context, req *bench.ReceiveBenchmarkJobRequest) (*bench.ReceiveBenchmarkJobResponse, error) {
-	var jobHandle *bench.ReceiveBenchmarkJobResponse_JobHandle
 	jobID := <-jobQue
 	jobResponse := &bench.ReceiveBenchmarkJobResponse{}
 	tx, err := db.Beginx()
@@ -96,7 +95,7 @@ func (b *benchmarkQueueService) ReceiveBenchmarkJob(ctx context.Context, req *be
 		JobCreatedAt:     timestamppb.New(job.CreatedAt),
 	}
 	if jobResponse.JobHandle != nil {
-		log.Printf("[DEBUG] Dequeued: job_handle=%+v", jobHandle)
+		log.Printf("[DEBUG] Dequeued: job_handle=%+v", jobResponse.JobHandle)
 	}
 	return jobResponse, nil
 }
