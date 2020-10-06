@@ -586,12 +586,16 @@ func (*ContestantService) Dashboard(e echo.Context) error {
 }
 
 func (*ContestantService) ListNotifications(e echo.Context) error {
+	after := time.After(9 * time.Second)
 	if ok, err := loginRequired(e, db, &loginRequiredOption{Team: true}); !ok {
 		return wrapError("check session", err)
 	}
 
 	// Empty implementation;
 	// Implemented in notifier.go with Web Push
+
+	// Reduce the number of calls of this function
+	<-after
 
 	return writeProto(e, http.StatusOK, &contestantpb.ListNotificationsResponse{
 		Notifications:               []*resources.Notification{},
