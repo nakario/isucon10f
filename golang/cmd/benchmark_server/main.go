@@ -75,10 +75,13 @@ func (b *benchmarkQueueService) ReceiveBenchmarkJob(ctx context.Context, req *be
 			if err != nil {
 				return false, fmt.Errorf("update benchmark job status: %w", err)
 			}
-			if affected, err := result.RowsAffected(); err != nil || affected <= 0 {
+			affected, err := result.RowsAffected()
+			if err != nil {
 				if err != sql.ErrNoRows {
 					return false, fmt.Errorf("update affected rows: %w", err)
 				}
+				return true, nil
+			} else if affected <= 0 {
 				return true, nil
 			}
 
