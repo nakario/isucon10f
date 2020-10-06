@@ -511,6 +511,9 @@ func (*ContestantService) ListClarifications(e echo.Context) error {
 		return fmt.Errorf("select clarifications: %w", err)
 	}
 	res := &contestantpb.ListClarificationsResponse{}
+	if err == sql.ErrNoRows {
+		return writeProto(e, http.StatusOK, res)
+	}
 	var teamIds string
 	for _, v := range clarifications {
 		teamIds += strconv.FormatInt(v.TeamID, 10)
