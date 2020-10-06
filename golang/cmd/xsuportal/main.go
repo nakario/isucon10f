@@ -54,7 +54,9 @@ var notifier xsuportal.Notifier
 func main() {
 	go func() { log.Println(http.ListenAndServe(":9090", nil)) }()
 	go resetPublicLeaderboardCacheEvery(500 * time.Millisecond)
-	go notifier.SendWebPushLoop()
+	for i := 0; i < 10; i++ {
+		go notifier.SendWebPushLoop()
+	}
 	srv := echo.New()
 	srv.Debug = false
 	srv.Server.Addr = fmt.Sprintf(":%v", util.GetEnv("PORT", "9292"))

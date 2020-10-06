@@ -273,7 +273,9 @@ func pollBenchmarkJob(db sqlx.Queryer) (*xsuportal.BenchmarkJob, error) {
 
 func main() {
 	go func() { log.Println(http.ListenAndServe(":9009", nil)) }()
-	go notifier.SendWebPushLoop()
+	for i := 0; i < 10; i++ {
+		go notifier.SendWebPushLoop()
+	}
 	port := util.GetEnv("PORT", "50051")
 	address := ":" + port
 
