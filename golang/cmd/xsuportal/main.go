@@ -515,11 +515,18 @@ func (*ContestantService) ListClarifications(e echo.Context) error {
 		return fmt.Errorf("select clarifications: %w", err)
 	}
 	res := &contestantpb.ListClarificationsResponse{}
-	teamPBs := make(map[int64]*resourcespb.Team, 100)
-	teams := make([]xsuportal.Team, 100)
+	var teamIds string
+	for _, v := range clarifications {
+		teamIds += strconv.FormatInt(v.TeamID, 10)
+		teamIds += ","
+	}
+	teamIds = teamIds[:len(teamIds)-1]
+	teamPBs := make(map[int64]*resourcespb.Team, 10)
+	teams := make([]xsuportal.Team, 10)
 	err = db.Select(
 		&teams,
-		"SELECT * FROM `teams`",
+		"SELECT * FROM `teams where id in (?)`",
+		teamIds,
 	)
 	if err != nil {
 		return fmt.Errorf("query : %w", err)
