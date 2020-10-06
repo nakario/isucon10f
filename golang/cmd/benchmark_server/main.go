@@ -38,39 +38,21 @@ func (b *benchmarkQueueService) Svc() *bench.BenchmarkQueueService {
 }
 
 func (b *benchmarkQueueService) ReceiveBenchmarkJob(ctx context.Context, req *bench.ReceiveBenchmarkJobRequest) (*bench.ReceiveBenchmarkJobResponse, error) {
-	jobID := <-jobQue
 	jobResponse := &bench.ReceiveBenchmarkJobResponse{}
-	tx, err := db.Beginx()
-	if err != nil {
-		return jobResponse, fmt.Errorf("begin tx: %w", err)
-	}
-	defer tx.Rollback()
 	var job xsuportal.BenchmarkJob
-	err = sqlx.Get(
-		db,
-		&job,
-		"SELECT * FROM `benchmark_jobs` WHERE `id` = ? AND `status` = ? FOR UPDATE",
-		jobID,
-		resources.BenchmarkJob_PENDING,
-	)
-	if err == sql.ErrNoRows {
-		return jobResponse, nil
-	}
-	if err != nil {
-		return jobResponse, fmt.Errorf("get benchmark job: %w", err)
-	}
 
 	randomBytes := make([]byte, 16)
-	_, err = rand.Read(randomBytes)
+	_, err := rand.Read(randomBytes)
 	if err != nil {
 		return jobResponse, fmt.Errorf("read random: %w", err)
 	}
 	handle := base64.StdEncoding.EncodeToString(randomBytes)
-	_, err = tx.Exec(
+	jobID := <-jobQue
+	_, err = db.Exec(
 		"UPDATE `benchmark_jobs` SET `status` = ?, `handle` = ? WHERE `id` = ? AND `status` = ? LIMIT 1",
 		resources.BenchmarkJob_SENT,
 		handle,
-		job.ID,
+		jobID,
 		resources.BenchmarkJob_PENDING,
 	)
 	if err != nil {
@@ -78,13 +60,16 @@ func (b *benchmarkQueueService) ReceiveBenchmarkJob(ctx context.Context, req *be
 	}
 
 	var contestStartsAt time.Time
-	err = tx.Get(&contestStartsAt, "SELECT `contest_starts_at` FROM `contest_config` LIMIT 1")
+	err = db.Get(&contestStartsAt, "SELECT `contest_starts_at` FROM `contest_config` LIMIT 1")
 	if err != nil {
 		return jobResponse, fmt.Errorf("get contest starts at: %w", err)
 	}
 
-	if err := tx.Commit(); err != nil {
-		return jobResponse, fmt.Errorf("commit tx: %w", err)
+	err = db.Get(&job, "SELECT * from `benchmark_jobs` where id = ?",
+		jobID,
+	)
+	if err != nil {
+		return jobResponse, fmt.Errorf("get benchmark job: %w", err)
 	}
 
 	jobResponse.JobHandle = &bench.ReceiveBenchmarkJobResponse_JobHandle{
