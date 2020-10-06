@@ -297,7 +297,7 @@ func (*AdminService) GetClarification(e echo.Context) error {
 var logger *log.Logger
 
 func init() {
-	logf, err := os.OpenFile("clar.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
+	logf, err := os.OpenFile("/home/isucon/clar.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -308,7 +308,18 @@ func init() {
 func (*AdminService) RespondClarification(e echo.Context) error {
 	var ta, tb, tc, td, te, tf, tg, th, ti, tj, tk, tl time.Time
 	defer func(){
-		logger.Printf("%v\t%v\t%v\t%v\t%v\t%v\t%v\t%v\t%v\t%v\t%v\n", tb.Sub(ta), tc.Sub(tb), td.Sub(tc), te.Sub(td), tf.Sub(te), tg.Sub(tf), th.Sub(tg), ti.Sub(th), tj.Sub(ti), tk.Sub(tj), tl.Sub(tk))
+		logger.Printf("%7d\t%7d\t%7d\t%7d\t%7d\t%7d\t%7d\t%7d\t%7d\t%7d\t%7d\n",
+		tb.Sub(ta).Microseconds(),
+		tc.Sub(tb).Microseconds(),
+		td.Sub(tc).Microseconds(),
+		te.Sub(td).Microseconds(),
+		tf.Sub(te).Microseconds(),
+		tg.Sub(tf).Microseconds(),
+		th.Sub(tg).Microseconds(),
+		ti.Sub(th).Microseconds(),
+		tj.Sub(ti).Microseconds(),
+		tk.Sub(tj).Microseconds(),
+		tl.Sub(tk).Microseconds())
 	}()
 	ta = time.Now()
 	tb, tc, td, te, tf, tg, th, ti, tj, tk, tl = ta, ta, ta, ta, ta, ta, ta, ta, ta, ta, ta
