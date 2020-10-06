@@ -513,10 +513,13 @@ func (*ContestantService) ListClarifications(e echo.Context) error {
 	res := &contestantpb.ListClarificationsResponse{}
 	teamPBs := make(map[int64]*resourcespb.Team, 100)
 	teams := make([]xsuportal.Team, 100)
-	err = db.Get(
+	err = db.Select(
 		&teams,
 		"SELECT * FROM `teams`",
 	)
+	if err != nil {
+		return fmt.Errorf("query : %w", err)
+	}
 	// make teamPB
 	for _, v := range teams {
 		teamPB, err := makeTeamPB(db, &v, false, true)
@@ -528,9 +531,6 @@ func (*ContestantService) ListClarifications(e echo.Context) error {
 	}
 
 	for _, clarification := range clarifications {
-		if err != nil {
-			return fmt.Errorf("get team(id=%v): %w", clarification.TeamID, err)
-		}
 		c, err := makeClarificationPBfromTeamPB(db, &clarification, teamPBs[clarification.TeamID])
 		if err != nil {
 			return fmt.Errorf("make clarification: %w", err)
