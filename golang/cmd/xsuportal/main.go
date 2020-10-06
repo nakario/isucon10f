@@ -511,17 +511,27 @@ func (*ContestantService) ListClarifications(e echo.Context) error {
 		return fmt.Errorf("select clarifications: %w", err)
 	}
 	res := &contestantpb.ListClarificationsResponse{}
+	teamPBs := make(map[int64]*resourcespb.Team, 100)
+	teams := make([]xsuportal.Team, 100)
+	err = db.Get(
+		&teams,
+		"SELECT * FROM `teams`",
+	)
+	// make teamPB
+	for _, v := range teams {
+		teamPB, err := makeTeamPB(db, &v, false, true)
+		if err != nil {
+			fmt.Errorf("make teamPBs : %w", err)
+			continue
+		}
+		teamPBs[v.ID] = teamPB
+	}
+
 	for _, clarification := range clarifications {
-		var team xsuportal.Team
-		err := db.Get(
-			&team,
-			"SELECT * FROM `teams` WHERE `id` = ? LIMIT 1",
-			clarification.TeamID,
-		)
 		if err != nil {
 			return fmt.Errorf("get team(id=%v): %w", clarification.TeamID, err)
 		}
-		c, err := makeClarificationPB(db, &clarification, &team)
+		c, err := makeClarificationPBfromTeamPB(db, &clarification, teamPBs[clarification.TeamID])
 		if err != nil {
 			return fmt.Errorf("make clarification: %w", err)
 		}
@@ -1257,6 +1267,22 @@ func halt(e echo.Context, code int, humanMessage string, err error) error {
 	}
 	res, _ := proto.Marshal(message)
 	return e.Blob(code, "application/vnd.google.protobuf; proto=xsuportal.proto.Error", res)
+}
+func makeClarificationPBfromTeamPB(db sqlx.Queryer, c *xsuportal.Clarification, t *resourcespb.Team) (*resourcespb.Clarification, error) {
+	pb := &resourcespb.Clarification{
+		Id:        c.ID,
+		TeamId:    c.TeamID,
+		Answered:  c.AnsweredAt.Valid,
+		Disclosed: c.Disclosed.Bool,
+		Question:  c.Question.String,
+		Answer:    c.Answer.String,
+		CreatedAt: timestamppb.New(c.CreatedAt),
+		Team:      t,
+	}
+	if c.AnsweredAt.Valid {
+		pb.AnsweredAt = timestamppb.New(c.AnsweredAt.Time)
+	}
+	return pb, nil
 }
 
 func makeClarificationPB(db sqlx.Queryer, c *xsuportal.Clarification, t *xsuportal.Team) (*resourcespb.Clarification, error) {
