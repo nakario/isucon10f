@@ -85,6 +85,7 @@ func (n *Notifier) NotifyClarificationAnswered(db sqlx.Ext, c *Clarification, up
 			return fmt.Errorf("select contestants(team_id=%v): %w", c.TeamID, err)
 		}
 	}
+	notificationPBs := make(map[string]*resources.Notification)
 	for _, contestant := range contestants {
 		notificationPB := &resources.Notification{
 			Content: &resources.Notification_ContentClarification{
@@ -95,14 +96,64 @@ func (n *Notifier) NotifyClarificationAnswered(db sqlx.Ext, c *Clarification, up
 				},
 			},
 		}
-		go func(id string) {
-			err := n.notify(db, notificationPB, id)
-			if err != nil {
-				log.Println("notify: ", err)
-			}
-		}(contestant.ID)
+		notificationPBs[contestant.ID] = notificationPB
 	}
+
+	go func() {
+		_, err := n.bulkNotify(db, notificationPBs)
+		if err != nil {
+			log.Println("notify: ", err)
+		}
+	}()
 	return nil
+}
+
+func (n *Notifier) bulkNotify(db sqlx.Ext, notificationPBs map[string]*resources.Notification) (*Notification, error) {
+	now := time.Now().Round(time.Microsecond)
+	nows := make([]interface{}, 0, 2 * len(notificationPBs))
+	values := ""
+	for k, v := range notificationPBs {
+		m, err := proto.Marshal(v)
+		if err != nil {
+			return nil, fmt.Errorf("marshal notification: %w", err)
+		}
+		encodedMessage := base64.StdEncoding.EncodeToString(m)
+		values += fmt.Sprintf("('%s', '%s', TRUE, ?, ?),", k, encodedMessage)
+		nows = append(nows, now, now)
+	}
+	values = values[:len(values)-1]
+	query := "INSERT INTO `notifications` (`contestant_id`, `encoded_message`, `read`, `created_at`, `updated_at`) VALUES " + values
+
+	res, err := db.Exec(
+		query,
+		nows...,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("insert notification: %w", err)
+	}
+	lastInsertID, _ := res.LastInsertId()
+	for i, v := range notificationPBs {
+		v.Id = lastInsertID
+		v.CreatedAt = timestamppb.New(now)
+
+		subscriptions, err := getPushSubscriptions(db, i)
+		if err != nil {
+			return nil, fmt.Errorf("get push subscriptions: %w", err)
+		}
+
+		for _, subscription := range subscriptions {
+			go func(rn *resources.Notification, s PushSubscription) {
+				for i := 0; i < 3; i++ {
+					err = n.SendWebPush(rn, &s)
+					if err != nil {
+						log.Println("send webpush: ", err)
+					}
+					time.Sleep(100 * time.Millisecond)
+				}
+			}(v, subscription)
+		}
+	}
+	return nil, nil
 }
 
 func (n *Notifier) NotifyBenchmarkJobFinished(db sqlx.Ext, job *BenchmarkJob) error {
@@ -119,6 +170,7 @@ func (n *Notifier) NotifyBenchmarkJobFinished(db sqlx.Ext, job *BenchmarkJob) er
 	if err != nil {
 		return fmt.Errorf("select contestants(team_id=%v): %w", job.TeamID, err)
 	}
+	notificationPBs := make(map[string]*resources.Notification)
 	for _, contestant := range contestants {
 		notificationPB := &resources.Notification{
 			Content: &resources.Notification_ContentBenchmarkJob{
@@ -127,13 +179,14 @@ func (n *Notifier) NotifyBenchmarkJobFinished(db sqlx.Ext, job *BenchmarkJob) er
 				},
 			},
 		}
-		go func(id string) {
-			err := n.notify(db, notificationPB, id)
-			if err != nil {
-				log.Println("notify: ", err)
-			}
-		}(contestant.ID)
+		notificationPBs[contestant.ID] = notificationPB
 	}
+	go func() {
+		_, err := n.bulkNotify(db, notificationPBs)
+		if err != nil {
+			log.Println("notify: ", err)
+		}
+	}()
 	return nil
 }
 
