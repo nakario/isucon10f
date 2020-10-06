@@ -126,8 +126,9 @@ func (b *benchmarkReportService) Svc() *bench.BenchmarkReportService {
 	}
 }
 
+var notifier xsuportal.Notifier
+
 func (b *benchmarkReportService) ReportBenchmarkResult(srv bench.BenchmarkReport_ReportBenchmarkResultServer) error {
-	var notifier xsuportal.Notifier
 	for {
 		req, err := srv.Recv()
 		if err != nil {
@@ -272,6 +273,7 @@ func pollBenchmarkJob(db sqlx.Queryer) (*xsuportal.BenchmarkJob, error) {
 
 func main() {
 	go func() { log.Println(http.ListenAndServe(":9009", nil)) }()
+	go notifier.SendWebPushLoop()
 	port := util.GetEnv("PORT", "50051")
 	address := ":" + port
 

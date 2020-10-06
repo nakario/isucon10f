@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"os"
 	"sync"
-	"time"
 
 	"github.com/SherClockHolmes/webpush-go"
 	"github.com/golang/protobuf/proto"
@@ -229,6 +228,30 @@ func getPushSubscriptions(db sqlx.Queryer, contestantID string) ([]PushSubscript
 	return subscriptions, nil
 }
 
+type push struct {
+	notification resources.Notification
+	subscription PushSubscription
+	count int
+}
+
+var pushCh = make(chan push, 1000)
+
+func (n *Notifier) SendWebPushLoop() {
+	for {
+		select {
+		case p := <- pushCh:
+			err := n.SendWebPush(&p.notification, &p.subscription)
+			if err != nil {
+				log.Println("send webpush: ", err)
+				p.count += 1
+				if p.count < 3 {
+					pushCh <- p
+				}
+			}
+		}
+	}
+}
+
 func (n *Notifier) notify(db sqlx.Ext, notificationPB *resources.Notification, contestantID string) (*Notification, error) {
 	m, err := proto.Marshal(notificationPB)
 	if err != nil {
@@ -263,17 +286,9 @@ func (n *Notifier) notify(db sqlx.Ext, notificationPB *resources.Notification, c
 		return nil, fmt.Errorf("get push subscriptions: %w", err)
 	}
 
-	go func() {
-		for i := 0; i < 3; i++ {
-			for _, subscription := range subscriptions {
-				err = n.SendWebPush(notificationPB, &subscription)
-				if err != nil {
-					log.Println("send webpush: ", err)
-				}
-			}
-			time.Sleep(100 * time.Millisecond)
-		}
-	}()
+	for _, subscription := range subscriptions {
+		pushCh <- push{*notificationPB, subscription, 0}
+	}
 
 	return &notification, nil
 }
