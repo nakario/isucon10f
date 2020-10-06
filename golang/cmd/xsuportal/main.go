@@ -312,7 +312,7 @@ func (*AdminService) RespondClarification(e echo.Context) error {
 	var clarificationBefore xsuportal.Clarification
 	err = tx.Get(
 		&clarificationBefore,
-		"SELECT * FROM `clarifications` WHERE `id` = ? LIMIT 1",
+		"SELECT * FROM `clarifications` WHERE `id` = ? LIMIT 1 FOR UPDATE",
 		id,
 	)
 	if err == sql.ErrNoRows {
