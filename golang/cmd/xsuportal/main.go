@@ -211,6 +211,10 @@ func (*AdminService) Initialize(e echo.Context) error {
 			Port: int64(port),
 		},
 	}
+	go func(){
+		<-time.After(100 * time.Second)
+		http.DefaultTransport.(*http.Transport).CloseIdleConnections()
+	}()
 	return writeProto(e, http.StatusOK, res)
 }
 

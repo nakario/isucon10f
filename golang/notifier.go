@@ -39,8 +39,8 @@ func init() {
 	client = &http.Client{
 		Transport: lhl.NewTransport(logf),
 	}
-	http.DefaultTransport.(*http.Transport).MaxConnsPerHost = 500
-	http.DefaultTransport.(*http.Transport).MaxIdleConns = 500
+	http.DefaultTransport.(*http.Transport).MaxConnsPerHost = 0
+	http.DefaultTransport.(*http.Transport).MaxIdleConns = 0
 	http.DefaultTransport.(*http.Transport).MaxIdleConnsPerHost = 500
 }
 
