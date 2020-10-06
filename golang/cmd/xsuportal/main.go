@@ -1,12 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"database/sql"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"io/ioutil"
@@ -405,6 +407,8 @@ func (*CommonService) GetCurrentSession(e echo.Context) error {
 
 type ContestantService struct{}
 
+var client http.Client
+
 func (*ContestantService) EnqueueBenchmarkJob(e echo.Context) error {
 	var req contestantpb.EnqueueBenchmarkJobRequest
 	if err := e.Bind(&req); err != nil {
@@ -455,6 +459,16 @@ func (*ContestantService) EnqueueBenchmarkJob(e echo.Context) error {
 		return fmt.Errorf("commit tx: %w", err)
 	}
 	j := makeBenchmarkJobPB(&job)
+	go func() {
+		bs := make([]byte, 100)
+		binary.BigEndian.PutUint64(bs, uint64(job.ID))
+		host := util.GetEnv("BENCHMARK_SERVER_HOST", "localhost")
+		req, _ := http.NewRequest("POST", "http://"+host+":9999"+"/enque", bytes.NewReader(bs))
+		_, err := client.Do(req)
+		if err != nil {
+			fmt.Errorf("job enque : %w", err)
+		}
+	}()
 	return writeProto(e, http.StatusOK, &contestantpb.EnqueueBenchmarkJobResponse{
 		Job: j,
 	})
