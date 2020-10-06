@@ -13,6 +13,7 @@ import (
 	"log"
 	"net/http"
 	_ "net/http/pprof"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -293,14 +294,33 @@ func (*AdminService) GetClarification(e echo.Context) error {
 	})
 }
 
+var logger *log.Logger
+
+func init() {
+	logf, err := os.OpenFile("clar.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
+	if err != nil {
+		log.Fatal(err)
+	}
+	logger = log.New(logf, "", log.Ltime)
+	logger.Print("ab\tbc\tcd\tde\tef\tfg\tgh\thi\tij\tjk\tkl\n")
+}
+
 func (*AdminService) RespondClarification(e echo.Context) error {
+	var ta, tb, tc, td, te, tf, tg, th, ti, tj, tk, tl time.Time
+	defer func(){
+		logger.Printf("%v\t%v\t%v\t%v\t%v\t%v\t%v\t%v\t%v\t%v\t%v\n", tb.Sub(ta), tc.Sub(tb), td.Sub(tc), te.Sub(td), tf.Sub(te), tg.Sub(tf), th.Sub(tg), ti.Sub(th), tj.Sub(ti), tk.Sub(tj), tl.Sub(tk))
+	}()
+	ta = time.Now()
+	tb, tc, td, te, tf, tg, th, ti, tj, tk, tl = ta, ta, ta, ta, ta, ta, ta, ta, ta, ta, ta
 	if ok, err := loginRequired(e, db, &loginRequiredOption{}); !ok {
 		return wrapError("check session", err)
 	}
+	tb = time.Now()
 	id, err := strconv.Atoi(e.Param("id"))
 	if err != nil {
 		return fmt.Errorf("parse id: %w", err)
 	}
+	tc = time.Now()
 	contestant, _ := getCurrentContestant(e, db, false)
 	if !contestant.Staff {
 		return halt(e, http.StatusForbidden, "管理者権限が必要です", nil)
@@ -309,6 +329,7 @@ func (*AdminService) RespondClarification(e echo.Context) error {
 	if err := e.Bind(&req); err != nil {
 		return err
 	}
+	td = time.Now()
 
 	tx, err := db.Beginx()
 	if err != nil {
@@ -330,6 +351,7 @@ func (*AdminService) RespondClarification(e echo.Context) error {
 	}
 	wasAnswered := clarificationBefore.AnsweredAt.Valid
 	wasDisclosed := clarificationBefore.Disclosed
+	te = time.Now()
 
 	_, err = tx.Exec(
 		"UPDATE `clarifications` SET `disclosed` = ?, `answer` = ?, `updated_at` = NOW(6), `answered_at` = NOW(6) WHERE `id` = ? LIMIT 1",
@@ -340,6 +362,7 @@ func (*AdminService) RespondClarification(e echo.Context) error {
 	if err != nil {
 		return fmt.Errorf("update clarification: %w", err)
 	}
+	tf = time.Now()
 	var clarification xsuportal.Clarification
 	err = tx.Get(
 		&clarification,
@@ -349,6 +372,7 @@ func (*AdminService) RespondClarification(e echo.Context) error {
 	if err != nil {
 		return fmt.Errorf("get clarification: %w", err)
 	}
+	tg = time.Now()
 	var team xsuportal.Team
 	err = tx.Get(
 		&team,
@@ -358,20 +382,26 @@ func (*AdminService) RespondClarification(e echo.Context) error {
 	if err != nil {
 		return fmt.Errorf("get team: %w", err)
 	}
+	th = time.Now()
 	c, err := makeClarificationPB(tx, &clarification, &team)
 	if err != nil {
 		return fmt.Errorf("make clarification: %w", err)
 	}
+	ti = time.Now()
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit tx: %w", err)
 	}
+	tj = time.Now()
 	updated := wasAnswered && wasDisclosed == clarification.Disclosed
 	if err := notifier.NotifyClarificationAnswered(db, &clarification, updated); err != nil {
 		return fmt.Errorf("notify clarification answered: %w", err)
 	}
-	return writeProto(e, http.StatusOK, &adminpb.RespondClarificationResponse{
+	tk = time.Now()
+	err = writeProto(e, http.StatusOK, &adminpb.RespondClarificationResponse{
 		Clarification: c,
 	})
+	tl = time.Now()
+	return err
 }
 
 type CommonService struct{}
