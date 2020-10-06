@@ -281,7 +281,7 @@ func (n *Notifier) notify(db sqlx.Ext, notificationPB *resources.Notification, c
 	notificationPB.Id = notification.ID
 	notificationPB.CreatedAt = timestamppb.New(notification.CreatedAt)
 
-	subscriptions, err := getPushSubscriptionsSF(db, contestantID)
+	subscriptions, err := getPushSubscriptions(db, contestantID)
 	if err != nil {
 		return nil, fmt.Errorf("get push subscriptions: %w", err)
 	}
