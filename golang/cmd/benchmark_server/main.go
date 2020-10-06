@@ -39,6 +39,12 @@ func (b *benchmarkQueueService) ReceiveBenchmarkJob(ctx context.Context, req *be
 	var jobHandle *bench.ReceiveBenchmarkJobResponse_JobHandle
 	for {
 		next, err := func() (bool, error) {
+			var contestStartsAt time.Time
+			err := db.Get(&contestStartsAt, "SELECT `contest_starts_at` FROM `contest_config` LIMIT 1")
+			if err != nil {
+				return false, fmt.Errorf("get contest starts at: %w", err)
+			}
+
 			tx, err := db.Beginx()
 			if err != nil {
 				return false, fmt.Errorf("begin tx: %w", err)
@@ -53,26 +59,13 @@ func (b *benchmarkQueueService) ReceiveBenchmarkJob(ctx context.Context, req *be
 				return false, nil
 			}
 
-			var gotLock bool
-			err = tx.Get(
-				&gotLock,
-				"SELECT 1 FROM `benchmark_jobs` WHERE `id` = ? AND `status` = ? FOR UPDATE",
-				job.ID,
-				resources.BenchmarkJob_PENDING,
-			)
-			if err == sql.ErrNoRows {
-				return true, nil
-			}
-			if err != nil {
-				return false, fmt.Errorf("get benchmark job with lock: %w", err)
-			}
 			randomBytes := make([]byte, 16)
 			_, err = rand.Read(randomBytes)
 			if err != nil {
 				return false, fmt.Errorf("read random: %w", err)
 			}
 			handle := base64.StdEncoding.EncodeToString(randomBytes)
-			_, err = tx.Exec(
+			result, err := tx.Exec(
 				"UPDATE `benchmark_jobs` SET `status` = ?, `handle` = ? WHERE `id` = ? AND `status` = ? LIMIT 1",
 				resources.BenchmarkJob_SENT,
 				handle,
@@ -82,11 +75,11 @@ func (b *benchmarkQueueService) ReceiveBenchmarkJob(ctx context.Context, req *be
 			if err != nil {
 				return false, fmt.Errorf("update benchmark job status: %w", err)
 			}
-
-			var contestStartsAt time.Time
-			err = tx.Get(&contestStartsAt, "SELECT `contest_starts_at` FROM `contest_config` LIMIT 1")
-			if err != nil {
-				return false, fmt.Errorf("get contest starts at: %w", err)
+			if affected, err := result.RowsAffected(); err != nil || affected <= 0 {
+				if err != sql.ErrNoRows {
+					return false, fmt.Errorf("update affected rows: %w", err)
+				}
+				return true, nil
 			}
 
 			if err := tx.Commit(); err != nil {
