@@ -403,6 +403,8 @@ func (*CommonService) GetCurrentSession(e echo.Context) error {
 
 type ContestantService struct{}
 
+var client http.Client
+
 func (*ContestantService) EnqueueBenchmarkJob(e echo.Context) error {
 	var req contestantpb.EnqueueBenchmarkJobRequest
 	if err := e.Bind(&req); err != nil {
@@ -457,7 +459,8 @@ func (*ContestantService) EnqueueBenchmarkJob(e echo.Context) error {
 		bs := make([]byte, 100)
 		binary.BigEndian.PutUint64(bs, uint64(job.ID))
 		host := util.GetEnv("BENCHMARK_SERVER_HOST", "localhost")
-		_, err := http.Post("http://"+host+":9999"+"/enque", "http/text", bytes.NewReader(bs))
+		req, _ := http.NewRequest("POST", "http://"+host+":9999"+"/enque", bytes.NewReader(bs))
+		_, err := client.Do(req)
 		if err != nil {
 			fmt.Errorf("job enque : %w", err)
 		}
