@@ -50,7 +50,7 @@ func (b *benchmarkQueueService) ReceiveBenchmarkJob(ctx context.Context, req *be
 	err = sqlx.Get(
 		db,
 		&job,
-		"SELECT * FROM `benchmark_jobs` WHERE id` = ? AND `status` = ? FOR UPDATE",
+		"SELECT * FROM `benchmark_jobs` WHERE `id` = ? AND `status` = ? FOR UPDATE",
 		jobID,
 		resources.BenchmarkJob_PENDING,
 	)
