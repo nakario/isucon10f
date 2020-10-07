@@ -611,6 +611,7 @@ func (*ContestantService) Dashboard(e echo.Context) error {
 		if err != nil {
 			return fmt.Errorf("make leaderboard: %w", err)
 		}
+		leaderboardCache = leaderboard
 		return writeProto(e, http.StatusOK, &contestantpb.DashboardResponse{
 			Leaderboard: leaderboard,
 		})
