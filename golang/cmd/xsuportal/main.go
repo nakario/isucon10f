@@ -703,8 +703,10 @@ func (*ContestantService) Dashboard(e echo.Context) error {
 					return false
 				}
 			})
+			finishedJobCount.mu.Lock()
 			leaderboardCache = tmpLeaderboardCache
-			finishedJobCount.Set(tmp)
+			finishedJobCount.val = tmp
+			finishedJobCount.mu.Unlock()
 			return writeProto(e, http.StatusOK, &contestantpb.DashboardResponse{
 				Leaderboard: &leaderboardCache,
 			})
