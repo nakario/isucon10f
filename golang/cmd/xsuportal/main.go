@@ -13,6 +13,7 @@ import (
 	"log"
 	"net/http"
 	_ "net/http/pprof"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -584,27 +585,141 @@ func (*ContestantService) Dashboard(e echo.Context) error {
 	}
 	contestFinished := contestStatus.Status == resourcespb.Contest_FINISHED
 	contestFreezesAt := contestStatus.ContestFreezesAt
+
+	if leaderboardCache == nil {
+		leaderboard, err := makeLeaderboardPB(team.ID)
+		if err != nil {
+			return fmt.Errorf("make leaderboard: %w", err)
+		}
+		return writeProto(e, http.StatusOK, &contestantpb.DashboardResponse{
+			Leaderboard: leaderboard,
+		})
+
+	}
+
 	if contestFinished || time.Now().Before(contestFreezesAt) {
 		fmt.Println("koko")
 		var tmpFinishedJobCount int
 		db.Get(&tmpFinishedJobCount, "SELECT count(*) from benchmark_jobs where finished_at IS NOT NULL")
-		if tmpFinishedJobCount == finishedJobCount && leaderboardCache != nil {
+		if tmpFinishedJobCount == finishedJobCount {
 			fmt.Println("success cache!")
 			return writeProto(e, http.StatusOK, &contestantpb.DashboardResponse{
 				Leaderboard: leaderboardCache,
 			})
 		} else {
-			leaderboard, err := makeLeaderboardPB(team.ID)
-			if err != nil {
-				return fmt.Errorf("make leaderboard: %w", err)
+			var jobs []xsuportal.BenchmarkJob
+			db.Select(&jobs,
+				"SELECT * from benchmark_job WHERE finished_at IS NOT NULL ORDER BY id DESC LIMIT ?",
+				tmpFinishedJobCount-finishedJobCount,
+			)
+			for _, v := range jobs {
+				for _, team := range leaderboardCache.Teams {
+					if v.TeamID == team.Team.Id {
+						score := int64(v.ScoreRaw.Int32 - v.ScoreDeduction.Int32)
+						team.Scores = append(team.Scores, &resources.Leaderboard_LeaderboardItem_LeaderboardScore{
+							Score:     score,
+							StartedAt: toTimestamp(v.StartedAt),
+							MarkedAt:  toTimestamp(v.FinishedAt),
+						})
+						if team.BestScore.Score <= score {
+							team.BestScore = &resourcespb.Leaderboard_LeaderboardItem_LeaderboardScore{
+								Score:     score,
+								StartedAt: toTimestamp(v.StartedAt),
+								MarkedAt:  toTimestamp(v.FinishedAt),
+							}
+						}
+						team.LatestScore = &resourcespb.Leaderboard_LeaderboardItem_LeaderboardScore{
+							Score:     score,
+							StartedAt: toTimestamp(v.StartedAt),
+							MarkedAt:  toTimestamp(v.FinishedAt),
+						}
+						team.FinishCount = team.FinishCount + 1
+						break
+					}
+				}
+				for _, team := range leaderboardCache.StudentTeams {
+					if v.TeamID == team.Team.Id {
+						score := int64(v.ScoreRaw.Int32 - v.ScoreDeduction.Int32)
+						team.Scores = append(team.Scores, &resources.Leaderboard_LeaderboardItem_LeaderboardScore{
+							Score:     score,
+							StartedAt: toTimestamp(v.StartedAt),
+							MarkedAt:  toTimestamp(v.FinishedAt),
+						})
+						if team.BestScore.Score <= score {
+							team.BestScore = &resourcespb.Leaderboard_LeaderboardItem_LeaderboardScore{
+								Score:     score,
+								StartedAt: toTimestamp(v.StartedAt),
+								MarkedAt:  toTimestamp(v.FinishedAt),
+							}
+						}
+						team.LatestScore = &resourcespb.Leaderboard_LeaderboardItem_LeaderboardScore{
+							Score:     score,
+							StartedAt: toTimestamp(v.StartedAt),
+							MarkedAt:  toTimestamp(v.FinishedAt),
+						}
+						team.FinishCount = team.FinishCount + 1
+						break
+					}
+				}
+				for _, team := range leaderboardCache.GeneralTeams {
+					if v.TeamID == team.Team.Id {
+						score := int64(v.ScoreRaw.Int32 - v.ScoreDeduction.Int32)
+						team.Scores = append(team.Scores, &resources.Leaderboard_LeaderboardItem_LeaderboardScore{
+							Score:     score,
+							StartedAt: toTimestamp(v.StartedAt),
+							MarkedAt:  toTimestamp(v.FinishedAt),
+						})
+						if team.BestScore.Score <= score {
+							team.BestScore = &resourcespb.Leaderboard_LeaderboardItem_LeaderboardScore{
+								Score:     score,
+								StartedAt: toTimestamp(v.StartedAt),
+								MarkedAt:  toTimestamp(v.FinishedAt),
+							}
+						}
+						team.LatestScore = &resourcespb.Leaderboard_LeaderboardItem_LeaderboardScore{
+							Score:     score,
+							StartedAt: toTimestamp(v.StartedAt),
+							MarkedAt:  toTimestamp(v.FinishedAt),
+						}
+						team.FinishCount = team.FinishCount + 1
+						break
+					}
+				}
 			}
-			leaderboardCache = leaderboard
+			// sort
+			sort.SliceStable(leaderboardCache.Teams, func(i, j int) bool {
+				if leaderboardCache.Teams[i].LatestScore.Score > leaderboardCache.Teams[j].LatestScore.Score {
+					return true
+				} else if leaderboardCache.Teams[i].LatestScore.Score == leaderboardCache.Teams[j].LatestScore.Score {
+					return leaderboardCache.Teams[i].LatestScore.MarkedAt.AsTime().Before(leaderboardCache.Teams[j].LatestScore.MarkedAt.AsTime())
+				} else {
+					return false
+				}
+			})
+			sort.SliceStable(leaderboardCache.GeneralTeams, func(i, j int) bool {
+				if leaderboardCache.GeneralTeams[i].LatestScore.Score > leaderboardCache.GeneralTeams[j].LatestScore.Score {
+					return true
+				} else if leaderboardCache.GeneralTeams[i].LatestScore.Score == leaderboardCache.GeneralTeams[j].LatestScore.Score {
+					return leaderboardCache.GeneralTeams[i].LatestScore.MarkedAt.AsTime().Before(leaderboardCache.GeneralTeams[j].LatestScore.MarkedAt.AsTime())
+				} else {
+					return false
+				}
+			})
+			sort.SliceStable(leaderboardCache.StudentTeams, func(i, j int) bool {
+				if leaderboardCache.StudentTeams[i].LatestScore.Score > leaderboardCache.StudentTeams[j].LatestScore.Score {
+					return true
+				} else if leaderboardCache.StudentTeams[i].LatestScore.Score == leaderboardCache.StudentTeams[j].LatestScore.Score {
+					return leaderboardCache.StudentTeams[i].LatestScore.MarkedAt.AsTime().Before(leaderboardCache.StudentTeams[j].LatestScore.MarkedAt.AsTime())
+				} else {
+					return false
+				}
+			})
 			finishedJobCount = tmpFinishedJobCount
 			return writeProto(e, http.StatusOK, &contestantpb.DashboardResponse{
-				Leaderboard: leaderboard,
+				Leaderboard: leaderboardCache,
 			})
 		}
-	} else {
+	} else { // freeze
 		leaderboard, err := makeLeaderboardPB(team.ID)
 		if err != nil {
 			return fmt.Errorf("make leaderboard: %w", err)
