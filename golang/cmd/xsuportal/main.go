@@ -623,18 +623,15 @@ func (*ContestantService) Dashboard(e echo.Context) error {
 	}
 	now := time.Now()
 	if contestFinished || (now.Before(contestFreezesAt) && now.After(contestStartsAt.Add((1 * time.Second)))) {
-		fmt.Println("koko")
 		var tmpFinishedJobCount int64
-		finishedJobCount.mu.Lock()
 		db.Get(&tmpFinishedJobCount, "SELECT count(*) from benchmark_jobs where finished_at IS NOT NULL")
 		if tmpFinishedJobCount == finishedJobCount.val {
-			fmt.Println("success cache!")
-			finishedJobCount.mu.Unlock()
 			return writeProto(e, http.StatusOK, &contestantpb.DashboardResponse{
 				Leaderboard: leaderboardCache,
 			})
 		} else {
 			var jobs []xsuportal.BenchmarkJob
+			finishedJobCount.mu.Lock()
 			db.Select(&jobs,
 				"SELECT * from benchmark_jobs WHERE finished_at IS NOT NULL ORDER BY updated_at LIMIT 100000 offset ?",
 				finishedJobCount.val,
@@ -670,9 +667,6 @@ func (*ContestantService) Dashboard(e echo.Context) error {
 						break
 					}
 				}
-			}
-			for _, v := range leaderboardCache.Teams {
-				fmt.Println("score num: ", len(v.Scores), v.FinishCount)
 			}
 			// sort
 			sort.SliceStable(leaderboardCache.Teams, func(i, j int) bool {
