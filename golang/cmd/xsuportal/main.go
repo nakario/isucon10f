@@ -72,6 +72,7 @@ var notifier xsuportal.Notifier
 var finishedJobCount *SafeCounter
 
 func main() {
+	finishedJobCount = &SafeCounter{val: 0}
 	go func() { log.Println(http.ListenAndServe(":9090", nil)) }()
 	go resetPublicLeaderboardCacheEvery(500 * time.Millisecond)
 	srv := echo.New()
