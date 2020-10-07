@@ -636,11 +636,14 @@ func (*ContestantService) Dashboard(e echo.Context) error {
 		} else {
 			var jobs []xsuportal.BenchmarkJob
 			db.Select(&jobs,
-				"SELECT * from benchmark_jobs WHERE finished_at IS NOT NULL ORDER BY finished_at LIMIT 100000 offset ?",
+				"SELECT * from benchmark_jobs WHERE finished_at IS NOT NULL ORDER BY updated_at LIMIT 100000 offset ?",
 				finishedJobCount.val,
 			)
 			finishedJobCount.val += int64(len(jobs))
 			fmt.Println(len(jobs))
+			sort.SliceStable(jobs, func(i, j int) bool {
+				return jobs[i].FinishedAt.Time.Before(jobs[j].FinishedAt.Time)
+			})
 			for _, v := range jobs {
 				for _, team := range leaderboardCache.Teams {
 					if v.TeamID == team.Team.Id {
