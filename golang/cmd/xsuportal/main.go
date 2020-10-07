@@ -613,6 +613,9 @@ func (*ContestantService) Dashboard(e echo.Context) error {
 			return fmt.Errorf("make leaderboard: %w", err)
 		}
 		leaderboardCache = leaderboard
+		var tmpFinishedJobCount int64
+		db.Get(&tmpFinishedJobCount, "SELECT count(*) from benchmark_jobs where finished_at IS NOT NULL")
+		finishedJobCount.Set(tmpFinishedJobCount)
 		return writeProto(e, http.StatusOK, &contestantpb.DashboardResponse{
 			Leaderboard: leaderboard,
 		})
