@@ -212,6 +212,7 @@ func getPushSubscriptions(db sqlx.Queryer, contestantID string) ([]PushSubscript
 			return nil, fmt.Errorf("select push subscriptions: %w", err)
 		}
 		PushSubscriptions.Store(contestantID, subscriptions)
+		return subscriptions, nil
 	}
 	return val.([]PushSubscription), nil
 }
