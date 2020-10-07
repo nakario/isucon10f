@@ -204,6 +204,10 @@ func (*AdminService) Initialize(e echo.Context) error {
 		if err != nil {
 			return fmt.Errorf("insert contest: %w", err)
 		}
+		xsuportal.PushSubscriptions.Range(func(key, val interface{}) bool {
+			xsuportal.PushSubscriptions.Delete(key)
+			return true
+		})
 	}
 
 	host := util.GetEnv("BENCHMARK_SERVER_HOST", "localhost")

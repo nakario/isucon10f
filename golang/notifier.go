@@ -248,18 +248,25 @@ func getPushSubscriptionsSF(db sqlx.Queryer, contestantID string) ([]PushSubscri
 	return v.([]PushSubscription), nil
 }
 
+var PushSubscriptions sync.Map
+
 func getPushSubscriptions(db sqlx.Queryer, contestantID string) ([]PushSubscription, error) {
-	var subscriptions []PushSubscription
-	err := sqlx.Select(
-		db,
-		&subscriptions,
-		"SELECT * FROM `push_subscriptions` WHERE `contestant_id` = ?",
-		contestantID,
-	)
-	if err != sql.ErrNoRows && err != nil {
-		return nil, fmt.Errorf("select push subscriptions: %w", err)
+	val, ok := PushSubscriptions.Load(contestantID)
+	if !ok {
+		var subscriptions []PushSubscription
+		err := sqlx.Select(
+			db,
+			&subscriptions,
+			"SELECT * FROM `push_subscriptions` WHERE `contestant_id` = ?",
+			contestantID,
+		)
+		if err != sql.ErrNoRows && err != nil {
+			return nil, fmt.Errorf("select push subscriptions: %w", err)
+		}
+		PushSubscriptions.Store(contestantID, subscriptions)
+		return subscriptions, nil
 	}
-	return subscriptions, nil
+	return val.([]PushSubscription), nil
 }
 
 func (n *Notifier) notify(db sqlx.Ext, notificationPB *resources.Notification, contestantID string) (*Notification, error) {
