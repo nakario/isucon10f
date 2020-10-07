@@ -57,6 +57,8 @@ const LeaderBoardServerKey = "board"
 
 var isMasterServerIP = MyServerIsOnMasterServerIP()
 var idToLeaderBoardServer = NewSyncMapServerConn(GetMasterServerAddress()+":8884", isMasterServerIP)
+var freezesAt time.Time
+var endsAt time.Time
 
 func main() {
 	go func() { log.Println(http.ListenAndServe(":9090", nil)) }()
@@ -184,8 +186,8 @@ func (*AdminService) Initialize(e echo.Context) error {
 	}
 
 	if req.Contest != nil {
-		freezesAt := req.Contest.ContestFreezesAt.AsTime().Round(time.Microsecond)
-		endsAt := req.Contest.ContestEndsAt.AsTime().Round(time.Microsecond)
+		freezesAt = req.Contest.ContestFreezesAt.AsTime().Round(time.Microsecond)
+		endsAt = req.Contest.ContestEndsAt.AsTime().Round(time.Microsecond)
 		go func() {
 			<-time.After(freezesAt.Sub(time.Now()))
 			freezeCh <- struct{}{}
@@ -585,51 +587,59 @@ func (*ContestantService) Dashboard(e echo.Context) error {
 	team, _ := getCurrentTeam(e, db, false)
 
 	var leaderboard *resourcespb.Leaderboard = &resourcespb.Leaderboard{}
-	if idToLeaderBoardServer.Exists(LeaderBoardServerKey) {
-		idToLeaderBoardServer.Get(LeaderBoardServerKey, leaderboard)
-		sort.SliceStable(leaderboard.Teams, func(i, j int) bool {
-			if leaderboard.Teams[i].LatestScore.Score > leaderboard.Teams[j].LatestScore.Score {
-				return true
-			} else if leaderboard.Teams[i].LatestScore.Score == leaderboard.Teams[j].LatestScore.Score {
-				return leaderboard.Teams[i].LatestScore.MarkedAt.AsTime().Before(leaderboard.Teams[j].LatestScore.MarkedAt.AsTime())
-			} else {
-				return false
+	if time.Now().Before(freezesAt) {
+		if idToLeaderBoardServer.Exists(LeaderBoardServerKey) {
+			idToLeaderBoardServer.Get(LeaderBoardServerKey, leaderboard)
+			sort.SliceStable(leaderboard.Teams, func(i, j int) bool {
+				if leaderboard.Teams[i].LatestScore.Score > leaderboard.Teams[j].LatestScore.Score {
+					return true
+				} else if leaderboard.Teams[i].LatestScore.Score == leaderboard.Teams[j].LatestScore.Score {
+					return leaderboard.Teams[i].LatestScore.MarkedAt.AsTime().Before(leaderboard.Teams[j].LatestScore.MarkedAt.AsTime())
+				} else {
+					return false
+				}
+			})
+			sort.SliceStable(leaderboard.GeneralTeams, func(i, j int) bool {
+				if leaderboard.GeneralTeams[i].LatestScore.Score > leaderboard.GeneralTeams[j].LatestScore.Score {
+					return true
+				} else if leaderboard.GeneralTeams[i].LatestScore.Score == leaderboard.GeneralTeams[j].LatestScore.Score {
+					return leaderboard.GeneralTeams[i].LatestScore.MarkedAt.AsTime().Before(leaderboard.GeneralTeams[j].LatestScore.MarkedAt.AsTime())
+				} else {
+					return false
+				}
+			})
+			sort.SliceStable(leaderboard.StudentTeams, func(i, j int) bool {
+				if leaderboard.StudentTeams[i].LatestScore.Score > leaderboard.StudentTeams[j].LatestScore.Score {
+					return true
+				} else if leaderboard.StudentTeams[i].LatestScore.Score == leaderboard.StudentTeams[j].LatestScore.Score {
+					return leaderboard.StudentTeams[i].LatestScore.MarkedAt.AsTime().Before(leaderboard.StudentTeams[j].LatestScore.MarkedAt.AsTime())
+				} else {
+					return false
+				}
+			})
+			// tmp, _ := makeLeaderboardPB(team.ID)
+			// fmt.Println("team id: ", team.ID)
+			// for _, v := range tmp.Teams {
+			// 	fmt.Print(v, " ")
+			// }
+			// fmt.Println(len(leaderboard.Teams) == len(tmp.Teams))
+			fmt.Println("leaderboard from memory")
+		} else {
+			leaderboardPtr, err := makeLeaderboardPB(team.ID)
+			if err != nil {
+				return fmt.Errorf("make leaderboard: %w", err)
 			}
-		})
-		sort.SliceStable(leaderboard.GeneralTeams, func(i, j int) bool {
-			if leaderboard.GeneralTeams[i].LatestScore.Score > leaderboard.GeneralTeams[j].LatestScore.Score {
-				return true
-			} else if leaderboard.GeneralTeams[i].LatestScore.Score == leaderboard.GeneralTeams[j].LatestScore.Score {
-				return leaderboard.GeneralTeams[i].LatestScore.MarkedAt.AsTime().Before(leaderboard.GeneralTeams[j].LatestScore.MarkedAt.AsTime())
-			} else {
-				return false
+			contestStatus, err := getCurrentContestStatus(db)
+			if contestStatus.ContestStartsAt.Before(time.Now()) {
+				fmt.Println("leaderboard on memory")
+				idToLeaderBoardServer.Set(LeaderBoardServerKey, *leaderboardPtr)
 			}
-		})
-		sort.SliceStable(leaderboard.StudentTeams, func(i, j int) bool {
-			if leaderboard.StudentTeams[i].LatestScore.Score > leaderboard.StudentTeams[j].LatestScore.Score {
-				return true
-			} else if leaderboard.StudentTeams[i].LatestScore.Score == leaderboard.StudentTeams[j].LatestScore.Score {
-				return leaderboard.StudentTeams[i].LatestScore.MarkedAt.AsTime().Before(leaderboard.StudentTeams[j].LatestScore.MarkedAt.AsTime())
-			} else {
-				return false
-			}
-		})
-		// tmp, _ := makeLeaderboardPB(team.ID)
-		// fmt.Println("team id: ", team.ID)
-		// for _, v := range tmp.Teams {
-		// 	fmt.Print(v, " ")
-		// }
-		// fmt.Println(len(leaderboard.Teams) == len(tmp.Teams))
-		fmt.Println("leaderboard from memory")
-	} else {
+			leaderboard = leaderboardPtr
+		}
+	} else { // freeze or end
 		leaderboardPtr, err := makeLeaderboardPB(team.ID)
 		if err != nil {
 			return fmt.Errorf("make leaderboard: %w", err)
-		}
-		contestStatus, err := getCurrentContestStatus(db)
-		if contestStatus.ContestStartsAt.Before(time.Now()) {
-			fmt.Println("leaderboard on memory")
-			idToLeaderBoardServer.Set(LeaderBoardServerKey, *leaderboardPtr)
 		}
 		leaderboard = leaderboardPtr
 	}
