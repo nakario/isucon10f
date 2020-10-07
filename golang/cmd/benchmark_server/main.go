@@ -22,18 +22,11 @@ import (
 
 	xsuportal "github.com/isucon/isucon10-final/webapp/golang"
 	"github.com/isucon/isucon10-final/webapp/golang/proto/xsuportal/resources"
-	resourcespb "github.com/isucon/isucon10-final/webapp/golang/proto/xsuportal/resources"
 	"github.com/isucon/isucon10-final/webapp/golang/proto/xsuportal/services/bench"
 	"github.com/isucon/isucon10-final/webapp/golang/util"
 )
 
 var db *sqlx.DB
-
-const RedisHostPrivateIPAddress = "10.162.10.102"
-const LeaderBoardServerKey = "board"
-
-var isMasterServerIP = MyServerIsOnMasterServerIP()
-var idToLeaderBoardServer = NewSyncMapServerConn(GetMasterServerAddress()+":8884", isMasterServerIP)
 
 type benchmarkQueueService struct {
 }
@@ -167,13 +160,6 @@ func (b *benchmarkReportService) ReportBenchmarkResult(srv bench.BenchmarkReport
 	}
 }
 
-func toTimestamp(t sql.NullTime) *timestamppb.Timestamp {
-	if t.Valid {
-		return timestamppb.New(t.Time)
-	}
-	return nil
-}
-
 func (b *benchmarkReportService) saveAsFinished(db sqlx.Execer, job *xsuportal.BenchmarkJob, req *bench.ReportBenchmarkResultRequest) error {
 	if !job.StartedAt.Valid || job.FinishedAt.Valid {
 		return status.Errorf(codes.FailedPrecondition, "Job %v has already finished or has not started yet", req.JobId)
@@ -203,92 +189,6 @@ func (b *benchmarkReportService) saveAsFinished(db sqlx.Execer, job *xsuportal.B
 	)
 	if err != nil {
 		return fmt.Errorf("update benchmark job status: %w", err)
-	}
-
-	// update leaderboard on memory
-	var leaderboard *resources.Leaderboard = &resources.Leaderboard{}
-	fmt.Println(idToLeaderBoardServer.AllKeys())
-	if idToLeaderBoardServer.Exists(LeaderBoardServerKey) {
-
-		ok := idToLeaderBoardServer.Get(LeaderBoardServerKey, leaderboard)
-		if !ok {
-			fmt.Println("not ok")
-			return nil
-		}
-		score := int64(raw.Int32 - deduction.Int32)
-		for _, v := range leaderboard.Teams {
-			if v.Team.Id == job.TeamID {
-				v.Scores = append(v.Scores, &resources.Leaderboard_LeaderboardItem_LeaderboardScore{
-					Score:     score,
-					StartedAt: toTimestamp(job.StartedAt),
-					MarkedAt:  result.MarkedAt,
-				})
-				if v.BestScore.Score <= score {
-					v.BestScore = &resourcespb.Leaderboard_LeaderboardItem_LeaderboardScore{
-						Score:     score,
-						StartedAt: toTimestamp(job.StartedAt),
-						MarkedAt:  result.MarkedAt,
-					}
-				}
-				v.LatestScore = &resourcespb.Leaderboard_LeaderboardItem_LeaderboardScore{
-					Score:     score,
-					StartedAt: toTimestamp(job.StartedAt),
-					MarkedAt:  result.MarkedAt,
-				}
-				v.FinishCount = v.FinishCount + 1
-				break
-			}
-		}
-		for _, v := range leaderboard.GeneralTeams {
-			if v.Team.Id == job.TeamID {
-				v.Scores = append(v.Scores, &resources.Leaderboard_LeaderboardItem_LeaderboardScore{
-					Score:     score,
-					StartedAt: toTimestamp(job.StartedAt),
-					MarkedAt:  result.MarkedAt,
-				})
-				if v.BestScore.Score <= score {
-					v.BestScore = &resourcespb.Leaderboard_LeaderboardItem_LeaderboardScore{
-						Score:     score,
-						StartedAt: toTimestamp(job.StartedAt),
-						MarkedAt:  result.MarkedAt,
-					}
-				}
-				v.LatestScore = &resourcespb.Leaderboard_LeaderboardItem_LeaderboardScore{
-					Score:     score,
-					StartedAt: toTimestamp(job.StartedAt),
-					MarkedAt:  result.MarkedAt,
-				}
-				v.FinishCount = v.FinishCount + 1
-				break
-			}
-		}
-		for _, v := range leaderboard.StudentTeams {
-			if v.Team.Id == job.TeamID {
-				v.Scores = append(v.Scores, &resources.Leaderboard_LeaderboardItem_LeaderboardScore{
-					Score:     score,
-					StartedAt: toTimestamp(job.StartedAt),
-					MarkedAt:  result.MarkedAt,
-				})
-				if v.BestScore.Score <= score {
-					v.BestScore = &resourcespb.Leaderboard_LeaderboardItem_LeaderboardScore{
-						Score:     score,
-						StartedAt: toTimestamp(job.StartedAt),
-						MarkedAt:  result.MarkedAt,
-					}
-				}
-				v.LatestScore = &resourcespb.Leaderboard_LeaderboardItem_LeaderboardScore{
-					Score:     score,
-					StartedAt: toTimestamp(job.StartedAt),
-					MarkedAt:  result.MarkedAt,
-				}
-				v.FinishCount = v.FinishCount + 1
-				break
-			}
-		}
-		fmt.Println("update leaderboard on memory")
-		idToLeaderBoardServer.FlushAll()
-		idToLeaderBoardServer.Set(LeaderBoardServerKey, *leaderboard)
-
 	}
 	return nil
 }

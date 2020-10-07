@@ -15,7 +15,6 @@ import (
 	"log"
 	"net/http"
 	_ "net/http/pprof"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -55,14 +54,6 @@ const (
 var db *sqlx.DB
 var notifier xsuportal.Notifier
 var contestantIdMap sync.Map
-
-const RedisHostPrivateIPAddress = "10.162.10.102"
-const LeaderBoardServerKey = "board"
-
-var isMasterServerIP = MyServerIsOnMasterServerIP()
-var idToLeaderBoardServer = NewSyncMapServerConn(GetMasterServerAddress()+":8884", isMasterServerIP)
-var freezesAt time.Time
-var endsAt time.Time
 
 func main() {
 	go func() { log.Println(http.ListenAndServe(":9090", nil)) }()
@@ -190,8 +181,8 @@ func (*AdminService) Initialize(e echo.Context) error {
 	}
 
 	if req.Contest != nil {
-		freezesAt = req.Contest.ContestFreezesAt.AsTime().Round(time.Microsecond)
-		endsAt = req.Contest.ContestEndsAt.AsTime().Round(time.Microsecond)
+		freezesAt := req.Contest.ContestFreezesAt.AsTime().Round(time.Microsecond)
+		endsAt := req.Contest.ContestEndsAt.AsTime().Round(time.Microsecond)
 		go func() {
 			<-time.After(freezesAt.Sub(time.Now()))
 			freezeCh <- struct{}{}
@@ -228,8 +219,6 @@ func (*AdminService) Initialize(e echo.Context) error {
 			Port: int64(port),
 		},
 	}
-
-	idToLeaderBoardServer.FlushAll()
 	return writeProto(e, http.StatusOK, res)
 }
 
@@ -632,66 +621,42 @@ func (*ContestantService) Dashboard(e echo.Context) error {
 	}
 	team, _ := getCurrentTeam(e, db, false)
 
-	var leaderboard *resourcespb.Leaderboard = &resourcespb.Leaderboard{}
-	if time.Now().Before(freezesAt) {
-		if idToLeaderBoardServer.Exists(LeaderBoardServerKey) {
-			idToLeaderBoardServer.Get(LeaderBoardServerKey, leaderboard)
-			sort.SliceStable(leaderboard.Teams, func(i, j int) bool {
-				if leaderboard.Teams[i].LatestScore.Score > leaderboard.Teams[j].LatestScore.Score {
-					return true
-				} else if leaderboard.Teams[i].LatestScore.Score == leaderboard.Teams[j].LatestScore.Score {
-					return leaderboard.Teams[i].LatestScore.MarkedAt.AsTime().Before(leaderboard.Teams[j].LatestScore.MarkedAt.AsTime())
-				} else {
-					return false
-				}
+	contestStatus, err := getCurrentContestStatus(db)
+	if err != nil {
+		return fmt.Errorf("get current contest status: %w", err)
+	}
+	contestFinished := contestStatus.Status == resourcespb.Contest_FINISHED
+	contestFreezesAt := contestStatus.ContestFreezesAt
+	if contestFinished || time.Now().Before(contestFreezesAt) {
+		fmt.Println("koko")
+		var tmpFinishedJobCount int
+		db.Get(&tmpFinishedJobCount, "SELECT count(*) from benchmark_jobs where finished_at IS NOT NULL")
+		if tmpFinishedJobCount == finishedJobCount && leaderboardCache != nil {
+			fmt.Println("success cache!")
+			return writeProto(e, http.StatusOK, &contestantpb.DashboardResponse{
+				Leaderboard: leaderboardCache,
 			})
-			sort.SliceStable(leaderboard.GeneralTeams, func(i, j int) bool {
-				if leaderboard.GeneralTeams[i].LatestScore.Score > leaderboard.GeneralTeams[j].LatestScore.Score {
-					return true
-				} else if leaderboard.GeneralTeams[i].LatestScore.Score == leaderboard.GeneralTeams[j].LatestScore.Score {
-					return leaderboard.GeneralTeams[i].LatestScore.MarkedAt.AsTime().Before(leaderboard.GeneralTeams[j].LatestScore.MarkedAt.AsTime())
-				} else {
-					return false
-				}
-			})
-			sort.SliceStable(leaderboard.StudentTeams, func(i, j int) bool {
-				if leaderboard.StudentTeams[i].LatestScore.Score > leaderboard.StudentTeams[j].LatestScore.Score {
-					return true
-				} else if leaderboard.StudentTeams[i].LatestScore.Score == leaderboard.StudentTeams[j].LatestScore.Score {
-					return leaderboard.StudentTeams[i].LatestScore.MarkedAt.AsTime().Before(leaderboard.StudentTeams[j].LatestScore.MarkedAt.AsTime())
-				} else {
-					return false
-				}
-			})
-			// tmp, _ := makeLeaderboardPB(team.ID)
-			// fmt.Println("team id: ", team.ID)
-			// for _, v := range tmp.Teams {
-			// 	fmt.Print(v, " ")
-			// }
-			// fmt.Println(len(leaderboard.Teams) == len(tmp.Teams))
-			fmt.Println("leaderboard from memory")
 		} else {
-			leaderboardPtr, err := makeLeaderboardPB(team.ID)
+			leaderboard, err := makeLeaderboardPB(team.ID)
 			if err != nil {
 				return fmt.Errorf("make leaderboard: %w", err)
 			}
-			contestStatus, err := getCurrentContestStatus(db)
-			if contestStatus.ContestStartsAt.Before(time.Now()) {
-				fmt.Println("leaderboard on memory")
-				idToLeaderBoardServer.Set(LeaderBoardServerKey, *leaderboardPtr)
-			}
-			leaderboard = leaderboardPtr
+			leaderboardCache = leaderboard
+			finishedJobCount = tmpFinishedJobCount
+			return writeProto(e, http.StatusOK, &contestantpb.DashboardResponse{
+				Leaderboard: leaderboard,
+			})
 		}
-	} else { // freeze or end
-		leaderboardPtr, err := makeLeaderboardPB(team.ID)
+	} else {
+		leaderboard, err := makeLeaderboardPB(team.ID)
 		if err != nil {
 			return fmt.Errorf("make leaderboard: %w", err)
 		}
-		leaderboard = leaderboardPtr
+		return writeProto(e, http.StatusOK, &contestantpb.DashboardResponse{
+			Leaderboard: leaderboard,
+		})
 	}
-	return writeProto(e, http.StatusOK, &contestantpb.DashboardResponse{
-		Leaderboard: leaderboard,
-	})
+
 }
 
 func (*ContestantService) ListNotifications(e echo.Context) error {
@@ -1173,17 +1138,6 @@ func (*RegistrationService) DeleteRegistration(e echo.Context) error {
 	}
 	cookie, _ := e.Cookie(SessionName)
 	contestantIdMap.Delete(cookie.Value)
-	leaderboard := &resources.Leaderboard{}
-	newTeams := []*resourcespb.Leaderboard_LeaderboardItem{}
-	ok := idToLeaderBoardServer.Get(LeaderBoardServerKey, leaderboard)
-	if ok {
-		for _, v := range leaderboard.Teams {
-			if v.Team.Id != team.ID {
-				newTeams = append(newTeams, v)
-			}
-		}
-		leaderboard.Teams = newTeams
-	}
 	return writeProto(e, http.StatusOK, &registrationpb.DeleteRegistrationResponse{})
 }
 
