@@ -138,16 +138,11 @@ func (b *benchmarkReportService) ReportBenchmarkResult(srv bench.BenchmarkReport
 		}
 
 		err = func() error {
-			tx, err := db.Beginx()
-			if err != nil {
-				return fmt.Errorf("begin tx: %w", err)
-			}
-			defer tx.Rollback()
 
 			var job xsuportal.BenchmarkJob
-			err = tx.Get(
+			err = db.Get(
 				&job,
-				"SELECT * FROM `benchmark_jobs` WHERE `id` = ? AND `handle` = ? LIMIT 1 FOR UPDATE",
+				"SELECT * FROM `benchmark_jobs` WHERE `id` = ? AND `handle` = ? LIMIT 1",
 				req.JobId,
 				req.Handle,
 			)
@@ -160,22 +155,16 @@ func (b *benchmarkReportService) ReportBenchmarkResult(srv bench.BenchmarkReport
 			}
 			if req.Result.Finished {
 				log.Printf("[DEBUG] %v: save as finished", req.JobId)
-				if err := b.saveAsFinished(tx, &job, req); err != nil {
+				if err := b.saveAsFinished(db, &job, req); err != nil {
 					return err
-				}
-				if err := tx.Commit(); err != nil {
-					return fmt.Errorf("commit tx: %w", err)
 				}
 				if err := notifier.NotifyBenchmarkJobFinished(db, &job); err != nil {
 					return fmt.Errorf("notify benchmark job finished: %w", err)
 				}
 			} else {
 				log.Printf("[DEBUG] %v: save as running", req.JobId)
-				if err := b.saveAsRunning(tx, &job, req); err != nil {
+				if err := b.saveAsRunning(db, &job, req); err != nil {
 					return err
-				}
-				if err := tx.Commit(); err != nil {
-					return fmt.Errorf("commit tx: %w", err)
 				}
 			}
 			return nil
@@ -210,7 +199,7 @@ func (b *benchmarkReportService) saveAsFinished(db sqlx.Execer, job *xsuportal.B
 		deduction.Int32 = int32(result.ScoreBreakdown.Deduction)
 	}
 	_, err := db.Exec(
-		"UPDATE `benchmark_jobs` SET `status` = ?, `score_raw` = ?, `score_deduction` = ?, `passed` = ?, `reason` = ?, `updated_at` = NOW(6), `finished_at` = ? WHERE `id` = ? LIMIT 1",
+		"UPDATE `benchmark_jobs` SET `status` = ?, `score_raw` = ?, `score_deduction` = ?, `passed` = ?, `reason` = ?, `updated_at` = NOW(6), `finished_at` = ? WHERE `id` = ? AND `status` = ? LIMIT 1",
 		resources.BenchmarkJob_FINISHED,
 		raw,
 		deduction,
@@ -218,6 +207,7 @@ func (b *benchmarkReportService) saveAsFinished(db sqlx.Execer, job *xsuportal.B
 		result.Reason,
 		markedAt,
 		req.JobId,
+		resources.BenchmarkJob_RUNNING,
 	)
 	if err != nil {
 		return fmt.Errorf("update benchmark job status: %w", err)
@@ -236,10 +226,11 @@ func (b *benchmarkReportService) saveAsRunning(db sqlx.Execer, job *xsuportal.Be
 		startedAt = req.Result.MarkedAt.AsTime().Round(time.Microsecond)
 	}
 	_, err := db.Exec(
-		"UPDATE `benchmark_jobs` SET `status` = ?, `score_raw` = NULL, `score_deduction` = NULL, `passed` = FALSE, `reason` = NULL, `started_at` = ?, `updated_at` = NOW(6), `finished_at` = NULL WHERE `id` = ? LIMIT 1",
+		"UPDATE `benchmark_jobs` SET `status` = ?, `score_raw` = NULL, `score_deduction` = NULL, `passed` = FALSE, `reason` = NULL, `started_at` = ?, `updated_at` = NOW(6), `finished_at` = NULL WHERE `id` = ? AND `status` = ? ? ? LIMIT 1",
 		resources.BenchmarkJob_RUNNING,
 		startedAt,
 		req.JobId,
+		resources.BenchmarkJob_SENT,
 	)
 	if err != nil {
 		return fmt.Errorf("update benchmark job status: %w", err)
