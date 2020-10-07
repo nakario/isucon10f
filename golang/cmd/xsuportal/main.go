@@ -61,7 +61,7 @@ func (c *SafeCounter) Value() int64 {
 	return c.val
 }
 
-func (c *SafeCounter) Set(a int64) int64 {
+func (c *SafeCounter) Set(a int64) {
 	c.mu.Lock()
 	c.val = a
 	c.mu.Unlock()
