@@ -69,7 +69,7 @@ func (c *SafeCounter) Set(a int64) {
 
 var db *sqlx.DB
 var notifier xsuportal.Notifier
-var finishedJobCount SafeCounter
+var finishedJobCount *SafeCounter
 
 func main() {
 	go func() { log.Println(http.ListenAndServe(":9090", nil)) }()
@@ -222,7 +222,7 @@ func (*AdminService) Initialize(e echo.Context) error {
 		}
 	}
 
-	finishedJobCount = SafeCounter{val: 0}
+	finishedJobCount = &SafeCounter{val: 0}
 
 	host := util.GetEnv("BENCHMARK_SERVER_HOST", "localhost")
 	port, _ := strconv.Atoi(util.GetEnv("BENCHMARK_SERVER_PORT", "50051"))
