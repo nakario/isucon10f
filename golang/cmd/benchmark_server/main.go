@@ -226,7 +226,7 @@ func (b *benchmarkReportService) saveAsRunning(db sqlx.Execer, job *xsuportal.Be
 		startedAt = req.Result.MarkedAt.AsTime().Round(time.Microsecond)
 	}
 	_, err := db.Exec(
-		"UPDATE `benchmark_jobs` SET `status` = ?, `score_raw` = NULL, `score_deduction` = NULL, `passed` = FALSE, `reason` = NULL, `started_at` = ?, `updated_at` = NOW(6), `finished_at` = NULL WHERE `id` = ? AND `status` = ? ? ? LIMIT 1",
+		"UPDATE `benchmark_jobs` SET `status` = ?, `score_raw` = NULL, `score_deduction` = NULL, `passed` = FALSE, `reason` = NULL, `started_at` = ?, `updated_at` = NOW(6), `finished_at` = NULL WHERE `id` = ? AND `status` = ? LIMIT 1",
 		resources.BenchmarkJob_RUNNING,
 		startedAt,
 		req.JobId,
