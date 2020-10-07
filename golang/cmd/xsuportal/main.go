@@ -223,6 +223,7 @@ func (*AdminService) Initialize(e echo.Context) error {
 		}
 	}
 
+	leaderboardCache = resourcespb.Leaderboard{}
 	finishedJobCount = &SafeCounter{val: 0}
 
 	host := util.GetEnv("BENCHMARK_SERVER_HOST", "localhost")
@@ -592,7 +593,7 @@ func (*ContestantService) RequestClarification(e echo.Context) error {
 	})
 }
 
-var leaderboardCache *resourcespb.Leaderboard
+var leaderboardCache resourcespb.Leaderboard
 
 func (*ContestantService) Dashboard(e echo.Context) error {
 	if ok, err := loginRequired(e, db, &loginRequiredOption{Team: true}); !ok {
@@ -608,12 +609,12 @@ func (*ContestantService) Dashboard(e echo.Context) error {
 	contestFreezesAt := contestStatus.ContestFreezesAt
 	contestStartsAt := contestStatus.ContestStartsAt
 
-	if leaderboardCache == nil {
+	if leaderboardCache.Teams == nil {
 		leaderboard, err := makeLeaderboardPB(team.ID)
 		if err != nil {
 			return fmt.Errorf("make leaderboard: %w", err)
 		}
-		leaderboardCache = leaderboard
+		leaderboardCache = *leaderboard
 		var tmpFinishedJobCount int64
 		db.Get(&tmpFinishedJobCount, "SELECT count(*) from benchmark_jobs where finished_at IS NOT NULL")
 		finishedJobCount.Set(tmpFinishedJobCount)
@@ -628,16 +629,17 @@ func (*ContestantService) Dashboard(e echo.Context) error {
 		db.Get(&tmpFinishedJobCount, "SELECT count(*) from benchmark_jobs where finished_at IS NOT NULL")
 		if tmpFinishedJobCount == finishedJobCount.val {
 			return writeProto(e, http.StatusOK, &contestantpb.DashboardResponse{
-				Leaderboard: leaderboardCache,
+				Leaderboard: &leaderboardCache,
 			})
 		} else {
 			var jobs []xsuportal.BenchmarkJob
 			finishedJobCount.mu.Lock()
+			tmpLeaderboardCache := leaderboardCache
 			db.Select(&jobs,
 				"SELECT * from benchmark_jobs WHERE finished_at IS NOT NULL ORDER BY updated_at LIMIT 100000 offset ?",
 				finishedJobCount.val,
 			)
-			finishedJobCount.val += int64(len(jobs))
+			tmp := finishedJobCount.val + int64(len(jobs))
 			finishedJobCount.mu.Unlock()
 			fmt.Println(len(jobs))
 			sort.SliceStable(jobs, func(i, j int) bool {
@@ -697,8 +699,10 @@ func (*ContestantService) Dashboard(e echo.Context) error {
 					return false
 				}
 			})
+			leaderboardCache = tmpLeaderboardCache
+			finishedJobCount.Set(tmp)
 			return writeProto(e, http.StatusOK, &contestantpb.DashboardResponse{
-				Leaderboard: leaderboardCache,
+				Leaderboard: &leaderboardCache,
 			})
 		}
 	} else { // freeze
@@ -706,7 +710,7 @@ func (*ContestantService) Dashboard(e echo.Context) error {
 		if err != nil {
 			return fmt.Errorf("make leaderboard: %w", err)
 		}
-		leaderboardCache = nil
+		leaderboardCache = resourcespb.Leaderboard{}
 		return writeProto(e, http.StatusOK, &contestantpb.DashboardResponse{
 			Leaderboard: leaderboard,
 		})
