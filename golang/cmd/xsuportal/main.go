@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/getlantern/deepcopy"
 	"github.com/go-sql-driver/mysql"
 	"github.com/golang/protobuf/proto"
 	"github.com/gorilla/sessions"
@@ -615,8 +616,10 @@ func (*ContestantService) Dashboard(e echo.Context) error {
 			return fmt.Errorf("make leaderboard: %w", err)
 		}
 		leaderboardCache = *leaderboard
-		var tmpFinishedJobCount int64
-		db.Get(&tmpFinishedJobCount, "SELECT count(*) from benchmark_jobs where finished_at IS NOT NULL")
+		var tmpFinishedJobCount int64 = 0
+		for _, v := range leaderboard.Teams {
+			tmpFinishedJobCount += v.FinishCount
+		}
 		finishedJobCount.Set(tmpFinishedJobCount)
 		return writeProto(e, http.StatusOK, &contestantpb.DashboardResponse{
 			Leaderboard: leaderboard,
@@ -634,7 +637,8 @@ func (*ContestantService) Dashboard(e echo.Context) error {
 		} else {
 			var jobs []xsuportal.BenchmarkJob
 			finishedJobCount.mu.Lock()
-			tmpLeaderboardCache := leaderboardCache
+			var tmpLeaderboardCache resourcespb.Leaderboard
+			deepcopy.Copy(tmpLeaderboardCache, leaderboardCache)
 			db.Select(&jobs,
 				"SELECT * from benchmark_jobs WHERE finished_at IS NOT NULL ORDER BY updated_at LIMIT 100000 offset ?",
 				finishedJobCount.val,
