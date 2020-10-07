@@ -640,6 +640,7 @@ func (*ContestantService) Dashboard(e echo.Context) error {
 				finishedJobCount.val,
 			)
 			finishedJobCount.val += int64(len(jobs))
+			finishedJobCount.mu.Unlock()
 			fmt.Println(len(jobs))
 			sort.SliceStable(jobs, func(i, j int) bool {
 				return jobs[i].FinishedAt.Time.Before(jobs[j].FinishedAt.Time)
@@ -701,7 +702,6 @@ func (*ContestantService) Dashboard(e echo.Context) error {
 					return false
 				}
 			})
-			finishedJobCount.mu.Unlock()
 			return writeProto(e, http.StatusOK, &contestantpb.DashboardResponse{
 				Leaderboard: leaderboardCache,
 			})
