@@ -665,6 +665,9 @@ func (*ContestantService) Dashboard(e echo.Context) error {
 					}
 				}
 			}
+			for _, v := range leaderboardCache.Teams {
+				fmt.Println("score num: ", len(v.Scores), v.FinishCount)
+			}
 			// sort
 			sort.SliceStable(leaderboardCache.Teams, func(i, j int) bool {
 				if leaderboardCache.Teams[i].LatestScore.Score > leaderboardCache.Teams[j].LatestScore.Score {
