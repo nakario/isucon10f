@@ -605,6 +605,7 @@ func (*ContestantService) Dashboard(e echo.Context) error {
 	}
 	contestFinished := contestStatus.Status == resourcespb.Contest_FINISHED
 	contestFreezesAt := contestStatus.ContestFreezesAt
+	contestStartsAt := contestStatus.ContestStartsAt
 
 	if leaderboardCache == nil {
 		leaderboard, err := makeLeaderboardPB(team.ID)
@@ -617,72 +618,29 @@ func (*ContestantService) Dashboard(e echo.Context) error {
 		})
 
 	}
-
-	if contestFinished || time.Now().Before(contestFreezesAt) {
+	now := time.Now()
+	if contestFinished || (now.Before(contestFreezesAt) && now.After(contestStartsAt.Add((1 * time.Second)))) {
 		fmt.Println("koko")
 		var tmpFinishedJobCount int64
+		finishedJobCount.mu.Lock()
 		db.Get(&tmpFinishedJobCount, "SELECT count(*) from benchmark_jobs where finished_at IS NOT NULL")
-		if tmpFinishedJobCount == finishedJobCount.Value() {
+		if tmpFinishedJobCount == finishedJobCount.val {
 			fmt.Println("success cache!")
+			finishedJobCount.mu.Unlock()
 			return writeProto(e, http.StatusOK, &contestantpb.DashboardResponse{
 				Leaderboard: leaderboardCache,
 			})
 		} else {
 			var jobs []xsuportal.BenchmarkJob
 			db.Select(&jobs,
-				"SELECT * from benchmark_jobs WHERE finished_at IS NOT NULL ORDER BY id DESC LIMIT ?",
-				tmpFinishedJobCount-finishedJobCount.Value(),
+				"SELECT * from benchmark_jobs WHERE finished_at IS NOT NULL ORDER BY finished_at DESC LIMIT ?",
+				tmpFinishedJobCount-finishedJobCount.val,
 			)
-			for _, v := range jobs {
+			finishedJobCount.val = tmpFinishedJobCount
+			fmt.Println(len(jobs))
+			for i := len(jobs) - 1; i >= 0; i-- {
+				v := jobs[i]
 				for _, team := range leaderboardCache.Teams {
-					if v.TeamID == team.Team.Id {
-						score := int64(v.ScoreRaw.Int32 - v.ScoreDeduction.Int32)
-						team.Scores = append(team.Scores, &resources.Leaderboard_LeaderboardItem_LeaderboardScore{
-							Score:     score,
-							StartedAt: toTimestamp(v.StartedAt),
-							MarkedAt:  toTimestamp(v.FinishedAt),
-						})
-						if team.BestScore.Score <= score {
-							team.BestScore = &resourcespb.Leaderboard_LeaderboardItem_LeaderboardScore{
-								Score:     score,
-								StartedAt: toTimestamp(v.StartedAt),
-								MarkedAt:  toTimestamp(v.FinishedAt),
-							}
-						}
-						team.LatestScore = &resourcespb.Leaderboard_LeaderboardItem_LeaderboardScore{
-							Score:     score,
-							StartedAt: toTimestamp(v.StartedAt),
-							MarkedAt:  toTimestamp(v.FinishedAt),
-						}
-						team.FinishCount = team.FinishCount + 1
-						break
-					}
-				}
-				for _, team := range leaderboardCache.StudentTeams {
-					if v.TeamID == team.Team.Id {
-						score := int64(v.ScoreRaw.Int32 - v.ScoreDeduction.Int32)
-						team.Scores = append(team.Scores, &resources.Leaderboard_LeaderboardItem_LeaderboardScore{
-							Score:     score,
-							StartedAt: toTimestamp(v.StartedAt),
-							MarkedAt:  toTimestamp(v.FinishedAt),
-						})
-						if team.BestScore.Score <= score {
-							team.BestScore = &resourcespb.Leaderboard_LeaderboardItem_LeaderboardScore{
-								Score:     score,
-								StartedAt: toTimestamp(v.StartedAt),
-								MarkedAt:  toTimestamp(v.FinishedAt),
-							}
-						}
-						team.LatestScore = &resourcespb.Leaderboard_LeaderboardItem_LeaderboardScore{
-							Score:     score,
-							StartedAt: toTimestamp(v.StartedAt),
-							MarkedAt:  toTimestamp(v.FinishedAt),
-						}
-						team.FinishCount = team.FinishCount + 1
-						break
-					}
-				}
-				for _, team := range leaderboardCache.GeneralTeams {
 					if v.TeamID == team.Team.Id {
 						score := int64(v.ScoreRaw.Int32 - v.ScoreDeduction.Int32)
 						team.Scores = append(team.Scores, &resources.Leaderboard_LeaderboardItem_LeaderboardScore{
@@ -735,7 +693,7 @@ func (*ContestantService) Dashboard(e echo.Context) error {
 					return false
 				}
 			})
-			finishedJobCount.Set(tmpFinishedJobCount)
+			finishedJobCount.mu.Unlock()
 			return writeProto(e, http.StatusOK, &contestantpb.DashboardResponse{
 				Leaderboard: leaderboardCache,
 			})
@@ -745,6 +703,7 @@ func (*ContestantService) Dashboard(e echo.Context) error {
 		if err != nil {
 			return fmt.Errorf("make leaderboard: %w", err)
 		}
+		leaderboardCache = nil
 		return writeProto(e, http.StatusOK, &contestantpb.DashboardResponse{
 			Leaderboard: leaderboard,
 		})
