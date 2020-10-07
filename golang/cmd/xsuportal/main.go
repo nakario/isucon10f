@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-sql-driver/mysql"
@@ -49,8 +50,26 @@ const (
 	SessionName                = "xsucon_session"
 )
 
+type SafeCounter struct {
+	mu  sync.Mutex
+	val int64
+}
+
+func (c *SafeCounter) Value() int64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.val
+}
+
+func (c *SafeCounter) Set(a int64) int64 {
+	c.mu.Lock()
+	c.val = a
+	c.mu.Unlock()
+}
+
 var db *sqlx.DB
 var notifier xsuportal.Notifier
+var finishedJobCount SafeCounter
 
 func main() {
 	go func() { log.Println(http.ListenAndServe(":9090", nil)) }()
@@ -202,6 +221,8 @@ func (*AdminService) Initialize(e echo.Context) error {
 			return fmt.Errorf("insert contest: %w", err)
 		}
 	}
+
+	finishedJobCount = SafeCounter{val: 0}
 
 	host := util.GetEnv("BENCHMARK_SERVER_HOST", "localhost")
 	port, _ := strconv.Atoi(util.GetEnv("BENCHMARK_SERVER_PORT", "50051"))
@@ -570,7 +591,6 @@ func (*ContestantService) RequestClarification(e echo.Context) error {
 	})
 }
 
-var finishedJobCount int = 0
 var leaderboardCache *resourcespb.Leaderboard
 
 func (*ContestantService) Dashboard(e echo.Context) error {
@@ -599,9 +619,9 @@ func (*ContestantService) Dashboard(e echo.Context) error {
 
 	if contestFinished || time.Now().Before(contestFreezesAt) {
 		fmt.Println("koko")
-		var tmpFinishedJobCount int
+		var tmpFinishedJobCount int64
 		db.Get(&tmpFinishedJobCount, "SELECT count(*) from benchmark_jobs where finished_at IS NOT NULL")
-		if tmpFinishedJobCount == finishedJobCount {
+		if tmpFinishedJobCount == finishedJobCount.Value() {
 			fmt.Println("success cache!")
 			return writeProto(e, http.StatusOK, &contestantpb.DashboardResponse{
 				Leaderboard: leaderboardCache,
@@ -609,8 +629,8 @@ func (*ContestantService) Dashboard(e echo.Context) error {
 		} else {
 			var jobs []xsuportal.BenchmarkJob
 			db.Select(&jobs,
-				"SELECT * from benchmark_job WHERE finished_at IS NOT NULL ORDER BY id DESC LIMIT ?",
-				tmpFinishedJobCount-finishedJobCount,
+				"SELECT * from benchmark_jobs WHERE finished_at IS NOT NULL ORDER BY id DESC LIMIT ?",
+				tmpFinishedJobCount-finishedJobCount.Value(),
 			)
 			for _, v := range jobs {
 				for _, team := range leaderboardCache.Teams {
@@ -714,7 +734,7 @@ func (*ContestantService) Dashboard(e echo.Context) error {
 					return false
 				}
 			})
-			finishedJobCount = tmpFinishedJobCount
+			finishedJobCount.Set(tmpFinishedJobCount)
 			return writeProto(e, http.StatusOK, &contestantpb.DashboardResponse{
 				Leaderboard: leaderboardCache,
 			})
