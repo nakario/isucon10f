@@ -638,11 +638,17 @@ func (*ContestantService) Dashboard(e echo.Context) error {
 			var jobs []xsuportal.BenchmarkJob
 			finishedJobCount.mu.Lock()
 			var tmpLeaderboardCache resourcespb.Leaderboard
-			deepcopy.Copy(tmpLeaderboardCache, leaderboardCache)
+			deepcopy.Copy(&tmpLeaderboardCache, leaderboardCache)
 			db.Select(&jobs,
 				"SELECT * from benchmark_jobs WHERE finished_at IS NOT NULL ORDER BY updated_at LIMIT 100000 offset ?",
 				finishedJobCount.val,
 			)
+			if len(jobs) == 0 {
+				finishedJobCount.mu.Unlock()
+				return writeProto(e, http.StatusOK, &contestantpb.DashboardResponse{
+					Leaderboard: &leaderboardCache,
+				})
+			}
 			tmp := finishedJobCount.val + int64(len(jobs))
 			finishedJobCount.mu.Unlock()
 			fmt.Println(len(jobs))
@@ -650,7 +656,7 @@ func (*ContestantService) Dashboard(e echo.Context) error {
 				return jobs[i].FinishedAt.Time.Before(jobs[j].FinishedAt.Time)
 			})
 			for _, v := range jobs {
-				for _, team := range leaderboardCache.Teams {
+				for _, team := range tmpLeaderboardCache.Teams {
 					if v.TeamID == team.Team.Id {
 						score := int64(v.ScoreRaw.Int32 - v.ScoreDeduction.Int32)
 						team.Scores = append(team.Scores, &resources.Leaderboard_LeaderboardItem_LeaderboardScore{
@@ -676,29 +682,29 @@ func (*ContestantService) Dashboard(e echo.Context) error {
 				}
 			}
 			// sort
-			sort.SliceStable(leaderboardCache.Teams, func(i, j int) bool {
-				if leaderboardCache.Teams[i].LatestScore.Score > leaderboardCache.Teams[j].LatestScore.Score {
+			sort.SliceStable(tmpLeaderboardCache.Teams, func(i, j int) bool {
+				if tmpLeaderboardCache.Teams[i].LatestScore.Score > tmpLeaderboardCache.Teams[j].LatestScore.Score {
 					return true
-				} else if leaderboardCache.Teams[i].LatestScore.Score == leaderboardCache.Teams[j].LatestScore.Score {
-					return leaderboardCache.Teams[i].LatestScore.MarkedAt.AsTime().Before(leaderboardCache.Teams[j].LatestScore.MarkedAt.AsTime())
+				} else if tmpLeaderboardCache.Teams[i].LatestScore.Score == tmpLeaderboardCache.Teams[j].LatestScore.Score {
+					return tmpLeaderboardCache.Teams[i].LatestScore.MarkedAt.AsTime().Before(tmpLeaderboardCache.Teams[j].LatestScore.MarkedAt.AsTime())
 				} else {
 					return false
 				}
 			})
-			sort.SliceStable(leaderboardCache.GeneralTeams, func(i, j int) bool {
-				if leaderboardCache.GeneralTeams[i].LatestScore.Score > leaderboardCache.GeneralTeams[j].LatestScore.Score {
+			sort.SliceStable(tmpLeaderboardCache.GeneralTeams, func(i, j int) bool {
+				if tmpLeaderboardCache.GeneralTeams[i].LatestScore.Score > tmpLeaderboardCache.GeneralTeams[j].LatestScore.Score {
 					return true
-				} else if leaderboardCache.GeneralTeams[i].LatestScore.Score == leaderboardCache.GeneralTeams[j].LatestScore.Score {
-					return leaderboardCache.GeneralTeams[i].LatestScore.MarkedAt.AsTime().Before(leaderboardCache.GeneralTeams[j].LatestScore.MarkedAt.AsTime())
+				} else if tmpLeaderboardCache.GeneralTeams[i].LatestScore.Score == tmpLeaderboardCache.GeneralTeams[j].LatestScore.Score {
+					return tmpLeaderboardCache.GeneralTeams[i].LatestScore.MarkedAt.AsTime().Before(tmpLeaderboardCache.GeneralTeams[j].LatestScore.MarkedAt.AsTime())
 				} else {
 					return false
 				}
 			})
-			sort.SliceStable(leaderboardCache.StudentTeams, func(i, j int) bool {
-				if leaderboardCache.StudentTeams[i].LatestScore.Score > leaderboardCache.StudentTeams[j].LatestScore.Score {
+			sort.SliceStable(tmpLeaderboardCache.StudentTeams, func(i, j int) bool {
+				if tmpLeaderboardCache.StudentTeams[i].LatestScore.Score > tmpLeaderboardCache.StudentTeams[j].LatestScore.Score {
 					return true
-				} else if leaderboardCache.StudentTeams[i].LatestScore.Score == leaderboardCache.StudentTeams[j].LatestScore.Score {
-					return leaderboardCache.StudentTeams[i].LatestScore.MarkedAt.AsTime().Before(leaderboardCache.StudentTeams[j].LatestScore.MarkedAt.AsTime())
+				} else if tmpLeaderboardCache.StudentTeams[i].LatestScore.Score == tmpLeaderboardCache.StudentTeams[j].LatestScore.Score {
+					return tmpLeaderboardCache.StudentTeams[i].LatestScore.MarkedAt.AsTime().Before(tmpLeaderboardCache.StudentTeams[j].LatestScore.MarkedAt.AsTime())
 				} else {
 					return false
 				}
