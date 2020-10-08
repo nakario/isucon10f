@@ -152,6 +152,9 @@ func (*AdminService) Initialize(e echo.Context) error {
 		return err
 	}
 
+	close(jobQueue)
+	jobQueue = make(chan xsuportal.BenchmarkJob, 1000)
+
 	queries := []string{
 		"TRUNCATE `teams`",
 		"TRUNCATE `contestants`",
