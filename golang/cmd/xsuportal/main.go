@@ -24,6 +24,7 @@ import (
 	"github.com/labstack/echo-contrib/session"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
+	"github.com/labstack/gommon/random"
 	"golang.org/x/sync/singleflight"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -370,6 +371,9 @@ func (*AdminService) RespondClarification(e echo.Context) error {
 type CommonService struct{}
 
 func (*CommonService) GetCurrentSession(e echo.Context) error {
+	hash := random.New().String(10, random.Alphabetic)
+	log.Println("GetCurrentSession: ", "start: ", hash)
+	defer log.Println("GetCurrentSession: ", "finish: ", hash)
 	res := &commonpb.GetCurrentSessionResponse{}
 	currentContestant, err := getCurrentContestant(e, db, false)
 	if err != nil {
@@ -378,6 +382,7 @@ func (*CommonService) GetCurrentSession(e echo.Context) error {
 	if currentContestant != nil {
 		res.Contestant = makeContestantPB(currentContestant)
 	}
+	log.Println("GetCurrentSession: ", "getCurrentContestant: ", hash)
 	currentTeam, err := getCurrentTeam(e, db, false)
 	if err != nil {
 		return fmt.Errorf("get current team: %w", err)
@@ -388,14 +393,17 @@ func (*CommonService) GetCurrentSession(e echo.Context) error {
 			return fmt.Errorf("make team: %w", err)
 		}
 	}
+	log.Println("GetCurrentSession: ", "getCurrentTeam: ", hash)
 	res.Contest, err = makeContestPB(e)
 	if err != nil {
 		return fmt.Errorf("make contest: %w", err)
 	}
+	log.Println("GetCurrentSession: ", "makeContestPB: ", hash)
 	vapidKey := notifier.VAPIDKey()
 	if vapidKey != nil {
 		res.PushVapidKey = vapidKey.VAPIDPublicKey
 	}
+	log.Println("GetCurrentSession: ", "VAPIDKey: ", hash)
 	return writeProto(e, http.StatusOK, res)
 }
 
@@ -654,6 +662,9 @@ func (*ContestantService) UnsubscribeNotification(e echo.Context) error {
 }
 
 func (*ContestantService) Signup(e echo.Context) error {
+	hashX := random.New().String(10, random.Alphabetic)
+	log.Println("Signup: ", "start: ", hashX)
+	defer log.Println("Signup: ", "finish: ", hashX)
 	var req contestantpb.SignupRequest
 	if err := e.Bind(&req); err != nil {
 		return err
@@ -671,6 +682,7 @@ func (*ContestantService) Signup(e echo.Context) error {
 	if err != nil {
 		return fmt.Errorf("insert contestant: %w", err)
 	}
+	log.Println("Signup: ", "insert contestant: ", hashX)
 	sess, err := session.Get(SessionName, e)
 	if err != nil {
 		return fmt.Errorf("get session: %w", err)
@@ -683,10 +695,14 @@ func (*ContestantService) Signup(e echo.Context) error {
 	if err := sess.Save(e.Request(), e.Response()); err != nil {
 		return fmt.Errorf("save session: %w", err)
 	}
+	log.Println("Signup: ", "sess.Save: ", hashX)
 	return writeProto(e, http.StatusOK, &contestantpb.SignupResponse{})
 }
 
 func (*ContestantService) Login(e echo.Context) error {
+	hashX := random.New().String(10, random.Alphabetic)
+	log.Println("Login: ", "start: ", hashX)
+	defer log.Println("Login: ", "finish: ", hashX)
 	var req contestantpb.LoginRequest
 	if err := e.Bind(&req); err != nil {
 		return err
@@ -700,6 +716,7 @@ func (*ContestantService) Login(e echo.Context) error {
 	if err != sql.ErrNoRows && err != nil {
 		return fmt.Errorf("get contestant: %w", err)
 	}
+	log.Println("Login: ", "select password: ", hashX)
 	passwordHash := sha256.Sum256([]byte(req.Password))
 	digest := hex.EncodeToString(passwordHash[:])
 	if err != sql.ErrNoRows && subtle.ConstantTimeCompare([]byte(digest), []byte(password)) == 1 {
@@ -744,11 +761,15 @@ func (*ContestantService) Logout(e echo.Context) error {
 type RegistrationService struct{}
 
 func (*RegistrationService) GetRegistrationSession(e echo.Context) error {
+	hash := random.New().String(10, random.Alphabetic)
+	log.Println("GetRegistrationSession: ", "start: ", hash)
+	defer log.Println("GetRegistrationSession: ", "finish: ", hash)
 	var team *xsuportal.Team
 	currentTeam, err := getCurrentTeam(e, db, false)
 	if err != nil {
 		return fmt.Errorf("get current team: %w", err)
 	}
+	log.Println("GetRegistrationSession: ", "getCurrentTeam: ", hash)
 	team = currentTeam
 	if team == nil {
 		teamIDStr := e.QueryParam("team_id")
@@ -771,6 +792,7 @@ func (*RegistrationService) GetRegistrationSession(e echo.Context) error {
 			if err != nil {
 				return fmt.Errorf("get team: %w", err)
 			}
+			log.Println("GetRegistrationSession: ", "validate invite_token: ", hash)
 			team = &t
 		}
 	}
@@ -786,6 +808,7 @@ func (*RegistrationService) GetRegistrationSession(e echo.Context) error {
 			return fmt.Errorf("select members: %w", err)
 		}
 	}
+	log.Println("GetRegistrationSession: ", "get members: ", hash)
 
 	res := &registrationpb.GetRegistrationSessionResponse{
 		Status: 0,
@@ -794,6 +817,7 @@ func (*RegistrationService) GetRegistrationSession(e echo.Context) error {
 	if err != nil {
 		return fmt.Errorf("get current contestant: %w", err)
 	}
+	log.Println("GetRegistrationSession: ", "getCurrentContestant: ", hash)
 	switch {
 	case contestant != nil && contestant.TeamID.Valid:
 		res.Status = registrationpb.GetRegistrationSessionResponse_JOINED
@@ -810,6 +834,7 @@ func (*RegistrationService) GetRegistrationSession(e echo.Context) error {
 	}
 	if team != nil {
 		res.Team, err = makeTeamPB(db, team, contestant != nil && currentTeam != nil && contestant.ID == currentTeam.LeaderID.String, true)
+		log.Println("GetRegistrationSession: ", "makeTeamPB: ", hash)
 		if err != nil {
 			return fmt.Errorf("make team: %w", err)
 		}
@@ -820,6 +845,9 @@ func (*RegistrationService) GetRegistrationSession(e echo.Context) error {
 }
 
 func (*RegistrationService) CreateTeam(e echo.Context) error {
+	hash := random.New().String(10, random.Alphabetic)
+	log.Println("CreateTeam: ", "start: ", hash)
+	defer log.Println("CreateTeam: ", "finish: ", hash)
 	var req registrationpb.CreateTeamRequest
 	if err := e.Bind(&req); err != nil {
 		return err
@@ -827,10 +855,12 @@ func (*RegistrationService) CreateTeam(e echo.Context) error {
 	if ok, err := loginRequired(e, db, &loginRequiredOption{}); !ok {
 		return wrapError("check session", err)
 	}
+	log.Println("CreateTeam: ", "loginRequired: ", hash)
 	ok, err := contestStatusRestricted(e, db, resourcespb.Contest_REGISTRATION, "チーム登録期間ではありません")
 	if !ok {
 		return wrapError("check contest status", err)
 	}
+	log.Println("CreateTeam: ", "ontestStatusRestricted: ", hash)
 
 	ctx := context.Background()
 	conn, err := db.Connx(ctx)
@@ -838,12 +868,14 @@ func (*RegistrationService) CreateTeam(e echo.Context) error {
 		return fmt.Errorf("get conn: %w", err)
 	}
 	defer conn.Close()
+	log.Println("CreateTeam: ", "Connx: ", hash)
 
 	_, err = conn.ExecContext(ctx, "LOCK TABLES `teams` WRITE, `contestants` WRITE")
 	if err != nil {
 		return fmt.Errorf("lock tables: %w", err)
 	}
 	defer conn.ExecContext(ctx, "UNLOCK TABLES")
+	log.Println("CreateTeam: ", "LOCK TABLES: ", hash)
 
 	randomBytes := make([]byte, 64)
 	_, err = rand.Read(randomBytes)
@@ -863,6 +895,7 @@ func (*RegistrationService) CreateTeam(e echo.Context) error {
 	if !withinCapacity {
 		return halt(e, http.StatusForbidden, "チーム登録数上限です", nil)
 	}
+	log.Println("CreateTeam: ", "count capacity: ", hash)
 	_, err = conn.ExecContext(
 		ctx,
 		"INSERT INTO `teams` (`name`, `email_address`, `invite_token`, `created_at`) VALUES (?, ?, ?, NOW(6))",
@@ -873,6 +906,7 @@ func (*RegistrationService) CreateTeam(e echo.Context) error {
 	if err != nil {
 		return fmt.Errorf("insert team: %w", err)
 	}
+	log.Println("CreateTeam: ", "insert teams: ", hash)
 	var teamID int64
 	err = conn.QueryRowContext(
 		ctx,
@@ -881,6 +915,7 @@ func (*RegistrationService) CreateTeam(e echo.Context) error {
 	if err != nil || teamID == 0 {
 		return halt(e, http.StatusInternalServerError, "チームを登録できませんでした", nil)
 	}
+	log.Println("CreateTeam: ", "last insert id: ", hash)
 
 	contestant, _ := getCurrentContestant(e, db, false)
 
@@ -895,11 +930,13 @@ func (*RegistrationService) CreateTeam(e echo.Context) error {
 	if err != nil {
 		return fmt.Errorf("update contestant: %w", err)
 	}
+	log.Println("CreateTeam: ", "update contestant: ", hash)
 
 	ok, err = contestStatusRestricted(e, db, resourcespb.Contest_REGISTRATION, "チーム登録期間ではありません")
 	if !ok {
 		return wrapError("check contest status", err)
 	}
+	log.Println("CreateTeam: ", "contestStatusRestricted 2: ", hash)
 
 	_, err = conn.ExecContext(
 		ctx,
@@ -910,6 +947,7 @@ func (*RegistrationService) CreateTeam(e echo.Context) error {
 	if err != nil {
 		return fmt.Errorf("update team: %w", err)
 	}
+	log.Println("CreateTeam: ", "update team leader: ", hash)
 
 	return writeProto(e, http.StatusOK, &registrationpb.CreateTeamResponse{
 		TeamId: teamID,
@@ -917,6 +955,8 @@ func (*RegistrationService) CreateTeam(e echo.Context) error {
 }
 
 func (*RegistrationService) JoinTeam(e echo.Context) error {
+	hash := random.New().String(10, random.Alphabetic)
+	log.Println("JoinTeam: ", "start: ", hash)
 	var req registrationpb.JoinTeamRequest
 	if err := e.Bind(&req); err != nil {
 		return err
@@ -930,9 +970,11 @@ func (*RegistrationService) JoinTeam(e echo.Context) error {
 	if ok, err := loginRequired(e, tx, &loginRequiredOption{Lock: true}); !ok {
 		return wrapError("check session", err)
 	}
+	log.Println("JoinTeam: ", "loginRequired: ", hash)
 	if ok, err := contestStatusRestricted(e, tx, resourcespb.Contest_REGISTRATION, "チーム登録期間ではありません"); !ok {
 		return wrapError("check contest status", err)
 	}
+	log.Println("JoinTeam: ", "contestStatusRestricted: ", hash)
 	var team xsuportal.Team
 	err = tx.Get(
 		&team,
@@ -946,6 +988,7 @@ func (*RegistrationService) JoinTeam(e echo.Context) error {
 	if err != nil {
 		return fmt.Errorf("get team with lock: %w", err)
 	}
+	log.Println("JoinTeam: ", "get team for update: ", hash)
 	var memberCount int
 	err = tx.Get(
 		&memberCount,
@@ -958,6 +1001,7 @@ func (*RegistrationService) JoinTeam(e echo.Context) error {
 	if memberCount >= 3 {
 		return halt(e, http.StatusBadRequest, "チーム人数の上限に達しています", nil)
 	}
+	log.Println("JoinTeam: ", "get member count: ", hash)
 
 	contestant, _ := getCurrentContestant(e, tx, false)
 	_, err = tx.Exec(
@@ -970,9 +1014,11 @@ func (*RegistrationService) JoinTeam(e echo.Context) error {
 	if err != nil {
 		return fmt.Errorf("update contestant: %w", err)
 	}
+	log.Println("JoinTeam: ", "getCurrentContestant: ", hash)
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit tx: %w", err)
 	}
+	log.Println("JoinTeam: ", "commit: ", hash)
 	return writeProto(e, http.StatusOK, &registrationpb.JoinTeamResponse{})
 }
 
