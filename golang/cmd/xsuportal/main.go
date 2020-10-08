@@ -430,26 +430,34 @@ func (*ContestantService) EnqueueBenchmarkJob(e echo.Context) error {
 	if jobCount > 0 {
 		return halt(e, http.StatusForbidden, "既にベンチマークを実行中です", nil)
 	}
-	_, err = tx.Exec(
-		"INSERT INTO `benchmark_jobs` (`team_id`, `target_hostname`, `status`, `updated_at`, `created_at`) VALUES (?, ?, ?, NOW(6), NOW(6))",
+	now := time.Now().Round(time.Microsecond)
+	result, err := tx.Exec(
+		"INSERT INTO `benchmark_jobs` (`team_id`, `target_hostname`, `status`, `updated_at`, `created_at`) VALUES (?, ?, ?, ?, ?)",
 		team.ID,
 		req.TargetHostname,
 		int(resourcespb.BenchmarkJob_PENDING),
+		now,
+		now,
 	)
 	if err != nil {
 		return fmt.Errorf("enqueue benchmark job: %w", err)
 	}
-	var job xsuportal.BenchmarkJob
-	err = tx.Get(
-		&job,
-		"SELECT * FROM `benchmark_jobs` WHERE `id` = (SELECT LAST_INSERT_ID()) LIMIT 1",
-	)
+	id, err := result.LastInsertId()
 	if err != nil {
-		return fmt.Errorf("get benchmark job: %w", err)
+		return fmt.Errorf("enqueued last benchmark id: %w", err)
+	}
+	var job = xsuportal.BenchmarkJob{
+		ID: id,
+		TeamID: team.ID,
+		TargetHostName: req.TargetHostname,
+		Status: int(resourcespb.BenchmarkJob_PENDING),
+		UpdatedAt: now,
+		CreatedAt: now,
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit tx: %w", err)
 	}
+	jobQueue <- job
 	j := makeBenchmarkJobPB(&job)
 	return writeProto(e, http.StatusOK, &contestantpb.EnqueueBenchmarkJobResponse{
 		Job: j,
