@@ -179,7 +179,7 @@ func (*AdminService) Initialize(e echo.Context) error {
 	if req.Contest != nil {
 		freezesAt := req.Contest.ContestFreezesAt.AsTime().Round(time.Microsecond)
 		endsAt := req.Contest.ContestEndsAt.AsTime().Round(time.Microsecond)
-		go func() {
+		go func(){
 			<-time.After(freezesAt.Sub(time.Now()))
 			freezeCh <- struct{}{}
 			<-time.After(endsAt.Sub(time.Now()))
@@ -894,11 +894,6 @@ func (*RegistrationService) CreateTeam(e echo.Context) error {
 	)
 	if err != nil {
 		return fmt.Errorf("update contestant: %w", err)
-	}
-
-	ok, err = contestStatusRestricted(e, db, resourcespb.Contest_REGISTRATION, "チーム登録期間ではありません")
-	if !ok {
-		return wrapError("check contest status", err)
 	}
 
 	_, err = conn.ExecContext(
