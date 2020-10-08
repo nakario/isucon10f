@@ -911,11 +911,6 @@ func (*RegistrationService) CreateTeam(e echo.Context) error {
 		return fmt.Errorf("update contestant: %w", err)
 	}
 
-	ok, err = contestStatusRestricted(e, db, resourcespb.Contest_REGISTRATION, "チーム登録期間ではありません")
-	if !ok {
-		return wrapError("check contest status", err)
-	}
-
 	_, err = conn.ExecContext(
 		ctx,
 		"UPDATE `teams` SET `leader_id` = ? WHERE `id` = ? LIMIT 1",
