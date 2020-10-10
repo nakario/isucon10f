@@ -15,11 +15,13 @@ import (
 	"log"
 	"net/http"
 	_ "net/http/pprof"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/getlantern/deepcopy"
 	"github.com/go-sql-driver/mysql"
 	"github.com/golang/protobuf/proto"
 	"github.com/gorilla/sessions"
@@ -54,6 +56,7 @@ const (
 var db *sqlx.DB
 var notifier xsuportal.Notifier
 var contestantIdMap sync.Map
+var freezeLeaderBoard sync.Map
 
 func main() {
 	go func() { log.Println(http.ListenAndServe(":9090", nil)) }()
@@ -663,6 +666,26 @@ func (*ContestantService) Dashboard(e echo.Context) error {
 				Leaderboard: leaderboard,
 			})
 		}
+	} else if contestStatus.Status == resourcespb.Contest_STARTED && time.Now().After(contestFreezesAt) { // freeze
+		val, ok := freezeLeaderBoard.Load("freeze")
+		var leaderboard *resourcespb.Leaderboard
+		if !ok {
+			leaderboard, err = makeLeaderboardPB(team.ID)
+			if err != nil {
+				return fmt.Errorf("make leaderboard: %w", err)
+			}
+			freezeLeaderBoard.Store("freeze", leaderboard)
+		} else {
+			var copyLeaderboard resourcespb.Leaderboard
+			deepcopy.Copy(&copyLeaderboard, val.(*resourcespb.Leaderboard))
+			updateLeaderboardPB(team.ID, &copyLeaderboard)
+			return writeProto(e, http.StatusOK, &contestantpb.DashboardResponse{
+				Leaderboard: &copyLeaderboard,
+			})
+		}
+		return writeProto(e, http.StatusOK, &contestantpb.DashboardResponse{
+			Leaderboard: leaderboard,
+		})
 	} else {
 		leaderboard, err := makeLeaderboardPB(team.ID)
 		if err != nil {
@@ -673,6 +696,147 @@ func (*ContestantService) Dashboard(e echo.Context) error {
 		})
 	}
 
+}
+
+func updateLeaderboardPB(teamID int64, leaderboard *resourcespb.Leaderboard) error {
+	contestStatus, err := getCurrentContestStatus(db)
+	if err != nil {
+		return fmt.Errorf("get current contest status: %w", err)
+	}
+	contestFinished := contestStatus.Status == resourcespb.Contest_FINISHED
+
+	tx, err := db.Beginx()
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+	var leaderboardByTeam []xsuportal.LeaderBoardTeam
+	query := "SELECT\n" +
+		"  `t`.`id` AS `id`,\n" +
+		"  `t`.`name` AS `name`,\n" +
+		"  `t`.`leader_id` AS `leader_id`,\n" +
+		"  `t`.`withdrawn` AS `withdrawn`,\n" +
+		"  `team_student_flags`.`student` AS `student`,\n" +
+		"  `l`.`best_score` AS `best_score`,\n" +
+		"  `best_score_jobs`.`started_at` AS `best_score_started_at`,\n" +
+		"  `best_score_jobs`.`finished_at` AS `best_score_marked_at`,\n" +
+		"  `l`.`latest_score` AS `latest_score`,\n" +
+		"  `latest_score_jobs`.`started_at` AS `latest_score_started_at`,\n" +
+		"  `latest_score_jobs`.`finished_at` AS `latest_score_marked_at`,\n" +
+		"  `l`.`finish_count` AS `finish_count`\n" +
+		"FROM\n" +
+		"  `leaderboard` AS `l`\n" +
+		"  LEFT JOIN `teams` AS `t` ON `t`.`id` = `l`.`team_id`\n" +
+		"  LEFT JOIN `benchmark_jobs` AS `best_score_jobs` ON `best_score_jobs`.`id` = `l`.`best_score_job_id`\n" +
+		"  LEFT JOIN `benchmark_jobs` AS `latest_score_jobs` ON `latest_score_jobs`.`id` = `l`.`latest_score_job_id`\n" +
+		"  -- check student teams\n" +
+		"  LEFT JOIN (\n" +
+		"    SELECT\n" +
+		"      `team_id`,\n" +
+		"      (SUM(`student`) = COUNT(*)) AS `student`\n" +
+		"    FROM\n" +
+		"      `contestants`\n" +
+		"    GROUP BY\n" +
+		"      `contestants`.`team_id`\n" +
+		"  ) `team_student_flags` ON `team_student_flags`.`team_id` = `t`.`id`\n" +
+		"WHERE `l`.`team_id` = ? AND `l`.`private`\n"
+	err = tx.Select(&leaderboardByTeam, query, teamID, contestFinished)
+	if err != sql.ErrNoRows && err != nil {
+		return fmt.Errorf("select leaderboard: %w", err)
+	}
+	jobResultsQuery := "SELECT\n" +
+		"  `team_id` AS `team_id`,\n" +
+		"  (`score_raw` - `score_deduction`) AS `score`,\n" +
+		"  `started_at` AS `started_at`,\n" +
+		"  `finished_at` AS `finished_at`\n" +
+		"FROM\n" +
+		"  `benchmark_jobs`\n" +
+		"WHERE\n" +
+		"  `started_at` IS NOT NULL\n" +
+		"  AND (\n" +
+		"    `finished_at` IS NOT NULL\n" +
+		"    -- score freeze\n" +
+		"    AND (`team_id` = ?)\n" +
+		"  )\n" +
+		"ORDER BY\n" +
+		"  `finished_at`"
+	var jobResults []xsuportal.JobResult
+	err = tx.Select(&jobResults, jobResultsQuery, teamID)
+	if err != sql.ErrNoRows && err != nil {
+		return fmt.Errorf("select job results: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit tx: %w", err)
+	}
+	teamGraphScores := make(map[int64][]*resourcespb.Leaderboard_LeaderboardItem_LeaderboardScore)
+	for _, jobResult := range jobResults {
+		teamGraphScores[jobResult.TeamID] = append(teamGraphScores[jobResult.TeamID], &resourcespb.Leaderboard_LeaderboardItem_LeaderboardScore{
+			Score:     jobResult.Score,
+			StartedAt: timestamppb.New(jobResult.StartedAt),
+			MarkedAt:  timestamppb.New(jobResult.FinishedAt),
+		})
+	}
+	for _, team := range leaderboardByTeam {
+		t, _ := makeTeamPB(db, team.Team(), false, false)
+		item := &resourcespb.Leaderboard_LeaderboardItem{
+			Scores: teamGraphScores[team.ID],
+			BestScore: &resourcespb.Leaderboard_LeaderboardItem_LeaderboardScore{
+				Score:     team.BestScore.Int64,
+				StartedAt: toTimestamp(team.BestScoreStartedAt),
+				MarkedAt:  toTimestamp(team.BestScoreMarkedAt),
+			},
+			LatestScore: &resourcespb.Leaderboard_LeaderboardItem_LeaderboardScore{
+				Score:     team.LatestScore.Int64,
+				StartedAt: toTimestamp(team.LatestScoreStartedAt),
+				MarkedAt:  toTimestamp(team.LatestScoreMarkedAt),
+			},
+			Team:        t,
+			FinishCount: team.FinishCount.Int64,
+		}
+		for i, v := range leaderboard.Teams {
+			if v.Team.Id == teamID {
+				leaderboard.Teams[i] = item
+			}
+		}
+		for i, v := range leaderboard.StudentTeams {
+			if v.Team.Id == teamID {
+				leaderboard.StudentTeams[i] = item
+			}
+		}
+		for i, v := range leaderboard.GeneralTeams {
+			if v.Team.Id == teamID {
+				leaderboard.GeneralTeams[i] = item
+			}
+		}
+	}
+	sort.SliceStable(leaderboard.Teams, func(i, j int) bool {
+		if leaderboard.Teams[i].LatestScore.Score > leaderboard.Teams[j].LatestScore.Score {
+			return true
+		} else if leaderboard.Teams[i].LatestScore.Score == leaderboard.Teams[j].LatestScore.Score {
+			return leaderboard.Teams[i].LatestScore.MarkedAt.AsTime().Before(leaderboard.Teams[j].LatestScore.MarkedAt.AsTime())
+		} else {
+			return false
+		}
+	})
+	sort.SliceStable(leaderboard.GeneralTeams, func(i, j int) bool {
+		if leaderboard.GeneralTeams[i].LatestScore.Score > leaderboard.GeneralTeams[j].LatestScore.Score {
+			return true
+		} else if leaderboard.GeneralTeams[i].LatestScore.Score == leaderboard.GeneralTeams[j].LatestScore.Score {
+			return leaderboard.GeneralTeams[i].LatestScore.MarkedAt.AsTime().Before(leaderboard.GeneralTeams[j].LatestScore.MarkedAt.AsTime())
+		} else {
+			return false
+		}
+	})
+	sort.SliceStable(leaderboard.StudentTeams, func(i, j int) bool {
+		if leaderboard.StudentTeams[i].LatestScore.Score > leaderboard.StudentTeams[j].LatestScore.Score {
+			return true
+		} else if leaderboard.StudentTeams[i].LatestScore.Score == leaderboard.StudentTeams[j].LatestScore.Score {
+			return leaderboard.StudentTeams[i].LatestScore.MarkedAt.AsTime().Before(leaderboard.StudentTeams[j].LatestScore.MarkedAt.AsTime())
+		} else {
+			return false
+		}
+	})
+	return nil
 }
 
 func (*ContestantService) ListNotifications(e echo.Context) error {
