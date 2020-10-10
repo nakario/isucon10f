@@ -1593,7 +1593,6 @@ func makeLeaderboardPB(teamID int64) (*resourcespb.Leaderboard, error) {
 
 	if len(jobResults) != len(jobResults2) {
 		fmt.Println("diff len: ", len(jobResults), len(jobResults2))
-		return nil, fmt.Errorf("erro")
 	}
 
 	for i := 0; i < len(jobResults); i++ {
