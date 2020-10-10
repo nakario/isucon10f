@@ -198,12 +198,13 @@ func (b *benchmarkReportService) saveAsFinished(db sqlx.Execer, job *xsuportal.B
 		deduction.Int32 = int32(result.ScoreBreakdown.Deduction)
 	}
 	_, err := db.Exec(
-		"UPDATE `benchmark_jobs` SET `status` = ?, `score_raw` = ?, `score_deduction` = ?, `passed` = ?, `reason` = ?, `updated_at` = NOW(6), `finished_at` = ? WHERE `id` = ? LIMIT 1",
+		"UPDATE `benchmark_jobs` SET `status` = ?, `score_raw` = ?, `score_deduction` = ?, `passed` = ?, `reason` = ?, `updated_at` = NOW(6), `started_at` = ?, `finished_at` = ? WHERE `id` = ? LIMIT 1",
 		resources.BenchmarkJob_FINISHED,
 		raw,
 		deduction,
 		result.Passed,
 		result.Reason,
+		job.StartedAt.Time,
 		markedAt,
 		req.JobId,
 	)
