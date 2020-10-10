@@ -30,7 +30,7 @@ import (
 var jobQueue = make(chan xsuportal.BenchmarkJob, 1000)
 var BenchResultMap sync.Map
 
-var jobs []*xsuportal.JobResult
+var jobResultsCache []*xsuportal.JobResult
 
 type benchmarkQueueService struct {
 }
@@ -253,9 +253,9 @@ func (b *benchmarkReportService) saveAsFinished(db sqlx.Ext, job *xsuportal.Benc
 	jobResult.StartedAt = job.StartedAt.Time
 	jobResult.FinishedAt = markedAt
 	jobResult.Score = int64(raw.Int32 - deduction.Int32)
-	jobs = append(jobs, jobResult)
-	sort.SliceStable(jobs, func(i, j int) bool {
-		return jobs[i].FinishedAt.Before(jobs[j].FinishedAt)
+	jobResultsCache = append(jobResultsCache, jobResult)
+	sort.SliceStable(jobResultsCache, func(i, j int) bool {
+		return jobResultsCache[i].FinishedAt.Before(jobResultsCache[j].FinishedAt)
 	})
 	return nil
 }
@@ -290,7 +290,7 @@ func pollBenchmarkJob() (*xsuportal.BenchmarkJob, error) {
 func benchMain() {
 	go func() { log.Println(http.ListenAndServe(":9009", nil)) }()
 
-	jobs = make([]*xsuportal.JobResult, 0, 2000)
+	jobResultsCache = make([]*xsuportal.JobResult, 0, 2000)
 
 	// benchmark job queue
 	port := util.GetEnv("PORT", "50051")
