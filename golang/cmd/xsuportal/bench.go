@@ -41,14 +41,9 @@ func (b *benchmarkQueueService) Svc() *bench.BenchmarkQueueService {
 func (b *benchmarkQueueService) ReceiveBenchmarkJob(ctx context.Context, req *bench.ReceiveBenchmarkJobRequest) (*bench.ReceiveBenchmarkJobResponse, error) {
 	jobResponse := &bench.ReceiveBenchmarkJobResponse{}
 
-	var err error = sql.ErrNoRows // Any non-nil error
-	var contestStartsAt time.Time
-	for err != nil {
-		err = db.Get(&contestStartsAt, "SELECT `contest_starts_at` FROM `contest_config` LIMIT 1")
-		if err != nil {
-			log.Println("get contest starts at: ", err)
-			time.Sleep(100 * time.Millisecond)
-		}
+	var defaultTime time.Time
+	for contestStartsAt != defaultTime {
+		time.Sleep(100 * time.Millisecond)
 	}
 
 	for {

@@ -54,6 +54,7 @@ const (
 var db *sqlx.DB
 var notifier xsuportal.Notifier
 var contestantIdMap sync.Map
+var contestStartsAt time.Time
 
 func main() {
 	go func() { log.Println(http.ListenAndServe(":9090", nil)) }()
@@ -187,7 +188,7 @@ func (*AdminService) Initialize(e echo.Context) error {
 	if req.Contest != nil {
 		freezesAt := req.Contest.ContestFreezesAt.AsTime().Round(time.Microsecond)
 		endsAt := req.Contest.ContestEndsAt.AsTime().Round(time.Microsecond)
-		go func(){
+		go func() {
 			<-time.After(freezesAt.Sub(time.Now()))
 			freezeCh <- struct{}{}
 			<-time.After(endsAt.Sub(time.Now()))
@@ -203,11 +204,18 @@ func (*AdminService) Initialize(e echo.Context) error {
 		if err != nil {
 			return fmt.Errorf("insert contest: %w", err)
 		}
+		contestStartsAt = req.Contest.ContestStartsAt.AsTime().Round(time.Microsecond)
 	} else {
 		_, err := db.Exec("INSERT `contest_config` (`registration_open_at`, `contest_starts_at`, `contest_freezes_at`, `contest_ends_at`) VALUES (TIMESTAMPADD(SECOND, 0, NOW(6)), TIMESTAMPADD(SECOND, 5, NOW(6)), TIMESTAMPADD(SECOND, 40, NOW(6)), TIMESTAMPADD(SECOND, 50, NOW(6)))")
 		if err != nil {
 			return fmt.Errorf("insert contest: %w", err)
 		}
+
+		err = db.Get(&contestStartsAt, "SELECT `contest_starts_at` FROM `contest_config` LIMIT 1")
+		if err != nil {
+			return fmt.Errorf("get contest starts at: ", err)
+		}
+
 		xsuportal.PushSubscriptions.Range(func(key, val interface{}) bool {
 			xsuportal.PushSubscriptions.Delete(key)
 			return true
@@ -236,12 +244,12 @@ func (*AdminService) ListClarifications(e echo.Context) error {
 	}
 	type ClarificationWithTeam struct {
 		C xsuportal.Clarification `db:"c"`
-		T xsuportal.Team `db:"t"`
+		T xsuportal.Team          `db:"t"`
 	}
 	var clarifications []ClarificationWithTeam
-	err := db.Select(&clarifications, "SELECT " +
-		"c.id AS `c.id`, c.team_id AS `c.team_id`, c.disclosed AS `c.disclosed`, c.question AS `c.question`, c.answer AS `c.answer`, c.answered_at AS `c.answered_at`, c.created_at AS `c.created_at`, c.updated_at AS `c.updated_at`, " +
-		"t.id AS `t.id`, t.name AS `t.name`, t.leader_id AS `t.leader_id`, t.email_address AS `t.email_address`, t.invite_token AS `t.invite_token`, t.withdrawn AS `t.withdrawn`, t.created_at AS `t.created_at` " +
+	err := db.Select(&clarifications, "SELECT "+
+		"c.id AS `c.id`, c.team_id AS `c.team_id`, c.disclosed AS `c.disclosed`, c.question AS `c.question`, c.answer AS `c.answer`, c.answered_at AS `c.answered_at`, c.created_at AS `c.created_at`, c.updated_at AS `c.updated_at`, "+
+		"t.id AS `t.id`, t.name AS `t.name`, t.leader_id AS `t.leader_id`, t.email_address AS `t.email_address`, t.invite_token AS `t.invite_token`, t.withdrawn AS `t.withdrawn`, t.created_at AS `t.created_at` "+
 		"FROM `clarifications` AS c INNER JOIN `teams` AS t ON t.id = c.team_id ORDER BY c.updated_at DESC")
 	if err != sql.ErrNoRows && err != nil {
 		return fmt.Errorf("query clarifications: %w", err)
