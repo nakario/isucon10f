@@ -1536,7 +1536,7 @@ func makeLeaderboardPB(teamID int64) (*resourcespb.Leaderboard, error) {
 		"  `l`.`latest_score` AS `latest_score`,\n" +
 		"  `latest_score_jobs`.`started_at` AS `latest_score_started_at`,\n" +
 		"  `latest_score_jobs`.`finished_at` AS `latest_score_marked_at`,\n" +
-		"  `latest_score_job_ids`.`finish_count` AS `finish_count`\n" +
+		"  `l`.`finish_count` AS `finish_count`\n" +
 		"FROM\n" +
 		"  `leaderboard` AS `l`\n" +
 		"  LEFT JOIN `teams` AS `t` ON `t`.`id` = `l`.`team_id`\n" +
