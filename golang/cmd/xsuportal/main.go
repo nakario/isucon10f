@@ -1487,7 +1487,7 @@ func makeContestantLeaderboardPBProto(teamID int64) ([]byte, error) {
 	}
 
 	key := "0"
-	if contest.CurrentTime.Before(contest.ContestFreezesAt) || contest.ContestEndsAt.Before(contest.CurrentTime) {
+	if contest.CurrentTime.After(contest.ContestFreezesAt) || contest.ContestEndsAt.After(contest.CurrentTime) {
 		key = strconv.Itoa(int(teamID))
 	}
 

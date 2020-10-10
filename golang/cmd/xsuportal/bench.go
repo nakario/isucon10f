@@ -170,7 +170,7 @@ func (b *benchmarkReportService) ReportBenchmarkResult(srv bench.BenchmarkReport
 			}
 
 			key2 := "0"
-			if ccs.CurrentTime.Before(ccs.ContestFreezesAt) || ccs.ContestEndsAt.Before(ccs.CurrentTime) {
+			if ccs.CurrentTime.After(ccs.ContestFreezesAt) || ccs.ContestEndsAt.After(ccs.CurrentTime) {
 				key2 = strconv.Itoa(int(job.TeamID))
 			}
 			contestantLeaderboardGroup.Forget(key2)
