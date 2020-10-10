@@ -1561,12 +1561,41 @@ func makeLeaderboardPB(teamID int64) (*resourcespb.Leaderboard, error) {
 	if err != sql.ErrNoRows && err != nil {
 		return nil, fmt.Errorf("select leaderboard: %w", err)
 	}
+
+	jobResultsQuery := "SELECT\n" +
+		"  `team_id` AS `team_id`,\n" +
+		"  (`score_raw` - `score_deduction`) AS `score`,\n" +
+		"  `started_at` AS `started_at`,\n" +
+		"  `finished_at` AS `finished_at`\n" +
+		"FROM\n" +
+		"  `benchmark_jobs`\n" +
+		"WHERE\n" +
+		"  `started_at` IS NOT NULL\n" +
+		"  AND (\n" +
+		"    `finished_at` IS NOT NULL\n" +
+		"    -- score freeze\n" +
+		"    AND (`team_id` = ? OR (`team_id` != ? AND (? = TRUE OR `finished_at` < ?)))\n" +
+		"  )\n" +
+		"ORDER BY\n" +
+		"  `finished_at`"
+	var jobResults2 []xsuportal.JobResult
+	err = tx.Select(&jobResults2, jobResultsQuery, teamID, teamID, contestFinished, contestFreezesAt)
+
 	var jobResults []xsuportal.JobResult
 	for _, j := range jobs {
 		if teamID == j.TeamID || contestFinished || j.FinishedAt.Before(contestFreezesAt) {
 			jobResults = append(jobResults, *j)
 		}
 	}
+	if len(jobResults) != len(jobResults2) {
+		fmt.Println("diff len: ", len(jobResults), len(jobResults2))
+		return nil, fmt.Errorf("erro")
+	}
+
+	for i := 0; i < len(jobResults); i++ {
+		fmt.Println("diff result: ", jobResults[i], jobResults2[i])
+	}
+
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit tx: %w", err)
 	}
