@@ -158,7 +158,7 @@ func (*AdminService) Initialize(e echo.Context) error {
 
 	close(jobQueue)
 	jobQueue = make(chan xsuportal.BenchmarkJob, 1000)
-	contestantLeaderboardGroup.Forget("0")
+	contestantLeaderboardGroup = &singleflight.Group{}
 
 	queries := []string{
 		"TRUNCATE `teams`",
@@ -1481,7 +1481,17 @@ func makePublicLeaderboardPBProto() ([]byte, error) {
 var contestantLeaderboardGroup = &singleflight.Group{}
 
 func makeContestantLeaderboardPBProto(teamID int64) ([]byte, error) {
-	v, err, shared := contestantLeaderboardGroup.Do("0", func() (interface{}, error) {
+	contest, err := getCurrentContestStatus(db)
+	if err != nil {
+		return nil, err
+	}
+
+	key := "0"
+	if contest.CurrentTime.Before(contest.ContestFreezesAt) || contest.ContestEndsAt.Before(contest.CurrentTime) {
+		key = strconv.Itoa(int(teamID))
+	}
+
+	v, err, shared := contestantLeaderboardGroup.Do(key, func() (interface{}, error) {
 		lb, err := makeLeaderboardPB(teamID)
 		if err != nil {
 			return nil, err
