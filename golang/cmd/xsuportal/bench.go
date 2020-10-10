@@ -237,8 +237,13 @@ func (b *benchmarkReportService) saveAsRunning(db sqlx.Execer, job *xsuportal.Be
 }
 
 func pollBenchmarkJob() (*xsuportal.BenchmarkJob, error) {
-	job := <-jobQueue
-	return &job, nil
+	select {
+
+	case job := <-jobQueue:
+		return &job, nil
+	case <-time.After(1 * time.Second):
+		return nil, nil
+	}
 }
 
 func benchMain() {
