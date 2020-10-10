@@ -226,13 +226,13 @@ func (b *benchmarkReportService) saveAsFinished(db sqlx.Ext, job *xsuportal.Benc
 	//   FALSE    FALSE   TRUE
 	// -> private OR NOT freezing
 	_, err = db.Exec(
-		"UPDATE `leaderboard` SET " +
-		"`best_score` = IF(`best_score` > ?, `best_score`, ?), " +
-		"`best_score_job_id` = IF(`best_score` > ?, `best_score_job_id`, ?), " +
-		"`latest_score` = ?, " +
-		"`latest_score_job_id` = ?, " +
-		"`finish_count` = `finish_count` + 1 " +
-		"WHERE `team_id` = ? AND (`private` OR NOT ?)",
+		"UPDATE `leaderboard` SET "+
+			"`best_score` = IF(`best_score` > ?, `best_score`, ?), "+
+			"`best_score_job_id` = IF(`best_score` > ?, `best_score_job_id`, ?), "+
+			"`latest_score` = ?, "+
+			"`latest_score_job_id` = ?, "+
+			"`finish_count` = `finish_count` + 1 "+
+			"WHERE `team_id` = ? AND (`private` OR NOT ?)",
 		score,
 		score,
 		score,
@@ -288,7 +288,8 @@ func benchMain() {
 	log.Print("[INFO] listen ", address)
 
 	db, _ = xsuportal.GetDB()
-	db.SetMaxOpenConns(40)
+	db.SetMaxOpenConns(400)
+	db.SetMaxIdleConns(400)
 
 	server := grpc.NewServer()
 
