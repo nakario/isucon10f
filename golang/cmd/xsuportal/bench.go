@@ -112,25 +112,40 @@ func (b *benchmarkReportService) Svc() *bench.BenchmarkReportService {
 
 func (b *benchmarkReportService) ReportBenchmarkResult(srv bench.BenchmarkReport_ReportBenchmarkResultServer) error {
 	var notifier xsuportal.Notifier
-	for {
-		req, err := srv.Recv()
-		if err != nil {
-			return err
+	errCh := make(chan error, 100)
+	reqCh := make(chan *bench.ReportBenchmarkResultRequest, 100)
+	go func() {
+		for {
+			req, err := srv.Recv()
+			if err != nil {
+				errCh <- err
+				return
+			}
+			reqCh <- req
+			select {
+			case <-srv.Context().Done():
+				return
+			default:
+			}
 		}
+	}()
+	for {
+		req := <- reqCh
 		if req.Result == nil {
 			return status.Error(codes.InvalidArgument, "result required")
 		}
 
-		err = func() error {
+		go func() {
 			key := strconv.Itoa(int(req.JobId)) + ":" + req.Handle
 			if !req.Result.Finished {
 				BenchResultMap.Store(key, req.Result.MarkedAt.AsTime().Round(time.Microsecond))
-				return nil
+				return
 			}
 
 			tx, err := db.Beginx()
 			if err != nil {
-				return fmt.Errorf("begin tx: %w", err)
+				errCh <- fmt.Errorf("begin tx: %w", err)
+				return
 			}
 			defer tx.Rollback()
 
@@ -143,39 +158,47 @@ func (b *benchmarkReportService) ReportBenchmarkResult(srv bench.BenchmarkReport
 			)
 			if err == sql.ErrNoRows {
 				log.Printf("[ERROR] Job not found: job_id=%v, handle=%+v", req.JobId, req.Handle)
-				return status.Errorf(codes.NotFound, "Job %d not found or handle is wrong", req.JobId)
+				errCh <- status.Errorf(codes.NotFound, "Job %d not found or handle is wrong", req.JobId)
+				return
 			}
 			if err != nil {
-				return fmt.Errorf("get benchmark job: %w", err)
+				errCh <- fmt.Errorf("get benchmark job: %w", err)
+				return
 			}
 
 			v, ok := BenchResultMap.Load(key)
 			if !ok {
-				return status.Errorf(codes.FailedPrecondition, "Job %v has already finished or has not started yet", req.JobId)
+				errCh <- status.Errorf(codes.FailedPrecondition, "Job %v has already finished or has not started yet", req.JobId)
+				return
 			}
 			job.StartedAt.Scan(v.(time.Time))
 			BenchResultMap.Delete(key)
 
 			log.Printf("[DEBUG] %v: save as finished", req.JobId)
 			if err := b.saveAsFinished(tx, &job, req); err != nil {
-				return err
+				errCh <- err
+				return
 			}
 			if err := tx.Commit(); err != nil {
-				return fmt.Errorf("commit tx: %w", err)
+				errCh <- fmt.Errorf("commit tx: %w", err)
+				return
 			}
 			if err := notifier.NotifyBenchmarkJobFinished(db, &job); err != nil {
-				return fmt.Errorf("notify benchmark job finished: %w", err)
+				errCh <- fmt.Errorf("notify benchmark job finished: %w", err)
+				return
 			}
-			return nil
+			return
 		}()
-		if err != nil {
-			return err
-		}
-		err = srv.Send(&bench.ReportBenchmarkResultResponse{
+		err := srv.Send(&bench.ReportBenchmarkResultResponse{
 			AckedNonce: req.GetNonce(),
 		})
 		if err != nil {
 			return fmt.Errorf("send report: %w", err)
+		}
+		select {
+		case err := <- errCh:
+			return fmt.Errorf("errCh: %w", err)
+		default:
 		}
 	}
 }
