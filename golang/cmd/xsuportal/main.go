@@ -1,12 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"database/sql"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"io/ioutil"
@@ -15,6 +17,7 @@ import (
 	_ "net/http/pprof"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-sql-driver/mysql"
@@ -50,10 +53,12 @@ const (
 
 var db *sqlx.DB
 var notifier xsuportal.Notifier
+var contestantIdMap sync.Map
 
 func main() {
 	go func() { log.Println(http.ListenAndServe(":9090", nil)) }()
 	go resetPublicLeaderboardCacheEvery(500 * time.Millisecond)
+	go benchMain()
 	srv := echo.New()
 	srv.Debug = false
 	srv.Server.Addr = fmt.Sprintf(":%v", util.GetEnv("PORT", "9292"))
@@ -151,6 +156,9 @@ func (*AdminService) Initialize(e echo.Context) error {
 		return err
 	}
 
+	close(jobQueue)
+	jobQueue = make(chan xsuportal.BenchmarkJob, 1000)
+
 	queries := []string{
 		"TRUNCATE `teams`",
 		"TRUNCATE `contestants`",
@@ -200,6 +208,10 @@ func (*AdminService) Initialize(e echo.Context) error {
 		if err != nil {
 			return fmt.Errorf("insert contest: %w", err)
 		}
+		xsuportal.PushSubscriptions.Range(func(key, val interface{}) bool {
+			xsuportal.PushSubscriptions.Delete(key)
+			return true
+		})
 	}
 
 	host := util.GetEnv("BENCHMARK_SERVER_HOST", "localhost")
@@ -358,10 +370,12 @@ func (*AdminService) RespondClarification(e echo.Context) error {
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit tx: %w", err)
 	}
-	updated := wasAnswered && wasDisclosed == clarification.Disclosed
-	if err := notifier.NotifyClarificationAnswered(db, &clarification, updated); err != nil {
-		return fmt.Errorf("notify clarification answered: %w", err)
-	}
+	go func() {
+		updated := wasAnswered && wasDisclosed == clarification.Disclosed
+		if err := notifier.NotifyClarificationAnswered(db, &clarification, updated); err != nil {
+			fmt.Errorf("notify clarification answered: %w", err)
+		}
+	}()
 	return writeProto(e, http.StatusOK, &adminpb.RespondClarificationResponse{
 		Clarification: c,
 	})
@@ -401,6 +415,8 @@ func (*CommonService) GetCurrentSession(e echo.Context) error {
 
 type ContestantService struct{}
 
+var client http.Client
+
 func (*ContestantService) EnqueueBenchmarkJob(e echo.Context) error {
 	var req contestantpb.EnqueueBenchmarkJobRequest
 	if err := e.Bind(&req); err != nil {
@@ -430,27 +446,45 @@ func (*ContestantService) EnqueueBenchmarkJob(e echo.Context) error {
 	if jobCount > 0 {
 		return halt(e, http.StatusForbidden, "既にベンチマークを実行中です", nil)
 	}
-	_, err = tx.Exec(
-		"INSERT INTO `benchmark_jobs` (`team_id`, `target_hostname`, `status`, `updated_at`, `created_at`) VALUES (?, ?, ?, NOW(6), NOW(6))",
+	now := time.Now().Round(time.Microsecond)
+	result, err := tx.Exec(
+		"INSERT INTO `benchmark_jobs` (`team_id`, `target_hostname`, `status`, `updated_at`, `created_at`) VALUES (?, ?, ?, ?, ?)",
 		team.ID,
 		req.TargetHostname,
 		int(resourcespb.BenchmarkJob_PENDING),
+		now,
+		now,
 	)
 	if err != nil {
 		return fmt.Errorf("enqueue benchmark job: %w", err)
 	}
-	var job xsuportal.BenchmarkJob
-	err = tx.Get(
-		&job,
-		"SELECT * FROM `benchmark_jobs` WHERE `id` = (SELECT LAST_INSERT_ID()) LIMIT 1",
-	)
+	id, err := result.LastInsertId()
 	if err != nil {
-		return fmt.Errorf("get benchmark job: %w", err)
+		return fmt.Errorf("enqueued last benchmark id: %w", err)
+	}
+	var job = xsuportal.BenchmarkJob{
+		ID:             id,
+		TeamID:         team.ID,
+		TargetHostName: req.TargetHostname,
+		Status:         int(resourcespb.BenchmarkJob_PENDING),
+		UpdatedAt:      now,
+		CreatedAt:      now,
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit tx: %w", err)
 	}
+	jobQueue <- job
 	j := makeBenchmarkJobPB(&job)
+	go func() {
+		bs := make([]byte, 100)
+		binary.BigEndian.PutUint64(bs, uint64(job.ID))
+		host := util.GetEnv("BENCHMARK_SERVER_HOST", "localhost")
+		req, _ := http.NewRequest("POST", "http://"+host+":9999"+"/enque", bytes.NewReader(bs))
+		_, err := client.Do(req)
+		if err != nil {
+			fmt.Errorf("job enque : %w", err)
+		}
+	}()
 	return writeProto(e, http.StatusOK, &contestantpb.EnqueueBenchmarkJobResponse{
 		Job: j,
 	})
@@ -511,17 +545,38 @@ func (*ContestantService) ListClarifications(e echo.Context) error {
 		return fmt.Errorf("select clarifications: %w", err)
 	}
 	res := &contestantpb.ListClarificationsResponse{}
-	for _, clarification := range clarifications {
-		var team xsuportal.Team
-		err := db.Get(
-			&team,
-			"SELECT * FROM `teams` WHERE `id` = ? LIMIT 1",
-			clarification.TeamID,
-		)
+	if err == sql.ErrNoRows || len(clarifications) == 0 {
+		return writeProto(e, http.StatusOK, res)
+	}
+
+	var teamIds string
+	for _, v := range clarifications {
+		teamIds += strconv.FormatInt(v.TeamID, 10)
+		teamIds += ","
+	}
+	teamIds = teamIds[:len(teamIds)-1]
+	teamPBs := make(map[int64]*resourcespb.Team, 10)
+	teams := make([]xsuportal.Team, 10)
+	err = db.Select(
+		&teams,
+		"SELECT * FROM `teams` where id in (?)",
+		teamIds,
+	)
+	if err != nil {
+		return fmt.Errorf("query : %w", err)
+	}
+	// make teamPB
+	for _, v := range teams {
+		teamPB, err := makeTeamPB(db, &v, false, true)
 		if err != nil {
-			return fmt.Errorf("get team(id=%v): %w", clarification.TeamID, err)
+			fmt.Errorf("make teamPBs : %w", err)
+			continue
 		}
-		c, err := makeClarificationPB(db, &clarification, &team)
+		teamPBs[v.ID] = teamPB
+	}
+
+	for _, clarification := range clarifications {
+		c, err := makeClarificationPBfromTeamPB(db, &clarification, teamPBs[clarification.TeamID])
 		if err != nil {
 			return fmt.Errorf("make clarification: %w", err)
 		}
@@ -569,18 +624,51 @@ func (*ContestantService) RequestClarification(e echo.Context) error {
 	})
 }
 
+var finishedJobCount int = 0
+var leaderboardCache *resourcespb.Leaderboard
+
 func (*ContestantService) Dashboard(e echo.Context) error {
 	if ok, err := loginRequired(e, db, &loginRequiredOption{Team: true}); !ok {
 		return wrapError("check session", err)
 	}
 	team, _ := getCurrentTeam(e, db, false)
-	leaderboard, err := makeLeaderboardPB(team.ID)
+
+	contestStatus, err := getCurrentContestStatus(db)
 	if err != nil {
-		return fmt.Errorf("make leaderboard: %w", err)
+		return fmt.Errorf("get current contest status: %w", err)
 	}
-	return writeProto(e, http.StatusOK, &contestantpb.DashboardResponse{
-		Leaderboard: leaderboard,
-	})
+	contestFinished := contestStatus.Status == resourcespb.Contest_FINISHED
+	contestFreezesAt := contestStatus.ContestFreezesAt
+	if contestFinished || time.Now().Before(contestFreezesAt) {
+		fmt.Println("koko")
+		var tmpFinishedJobCount int
+		db.Get(&tmpFinishedJobCount, "SELECT count(*) from benchmark_jobs where finished_at IS NOT NULL")
+		if tmpFinishedJobCount == finishedJobCount && leaderboardCache != nil {
+			fmt.Println("success cache!")
+			return writeProto(e, http.StatusOK, &contestantpb.DashboardResponse{
+				Leaderboard: leaderboardCache,
+			})
+		} else {
+			leaderboard, err := makeLeaderboardPB(team.ID)
+			if err != nil {
+				return fmt.Errorf("make leaderboard: %w", err)
+			}
+			leaderboardCache = leaderboard
+			finishedJobCount = tmpFinishedJobCount
+			return writeProto(e, http.StatusOK, &contestantpb.DashboardResponse{
+				Leaderboard: leaderboard,
+			})
+		}
+	} else {
+		leaderboard, err := makeLeaderboardPB(team.ID)
+		if err != nil {
+			return fmt.Errorf("make leaderboard: %w", err)
+		}
+		return writeProto(e, http.StatusOK, &contestantpb.DashboardResponse{
+			Leaderboard: leaderboard,
+		})
+	}
+
 }
 
 func (*ContestantService) ListNotifications(e echo.Context) error {
@@ -735,6 +823,8 @@ func (*ContestantService) Logout(e echo.Context) error {
 		if err := sess.Save(e.Request(), e.Response()); err != nil {
 			return fmt.Errorf("delete session: %w", err)
 		}
+		cookie, _ := e.Cookie(SessionName)
+		contestantIdMap.Delete(cookie.Value)
 	} else {
 		return halt(e, http.StatusUnauthorized, "ログインしていません", nil)
 	}
@@ -1053,6 +1143,8 @@ func (*RegistrationService) DeleteRegistration(e echo.Context) error {
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit tx: %w", err)
 	}
+	cookie, _ := e.Cookie(SessionName)
+	contestantIdMap.Delete(cookie.Value)
 	return writeProto(e, http.StatusOK, &registrationpb.DeleteRegistrationResponse{})
 }
 
@@ -1198,6 +1290,15 @@ type loginRequiredOption struct {
 }
 
 func loginRequired(e echo.Context, db sqlx.Queryer, option *loginRequiredOption) (bool, error) {
+	cookie, err := e.Cookie(SessionName)
+	if err != nil {
+		return false, halt(e, http.StatusUnauthorized, "ログインが必要です", nil)
+	}
+	if !option.Lock {
+		if _, ok := contestantIdMap.Load(cookie.Value); ok {
+			return true, nil
+		}
+	}
 	contestant, err := getCurrentContestant(e, db, option.Lock)
 	if err != nil {
 		return false, fmt.Errorf("current contestant: %w", err)
@@ -1205,6 +1306,7 @@ func loginRequired(e echo.Context, db sqlx.Queryer, option *loginRequiredOption)
 	if contestant == nil {
 		return false, halt(e, http.StatusUnauthorized, "ログインが必要です", nil)
 	}
+
 	if option.Team {
 		t, err := getCurrentTeam(e, db, option.Lock)
 		if err != nil {
@@ -1214,6 +1316,7 @@ func loginRequired(e echo.Context, db sqlx.Queryer, option *loginRequiredOption)
 			return false, halt(e, http.StatusForbidden, "参加登録が必要です", nil)
 		}
 	}
+	contestantIdMap.Store(cookie.Value, contestant.ID)
 	return true, nil
 }
 
@@ -1252,6 +1355,22 @@ func halt(e echo.Context, code int, humanMessage string, err error) error {
 	}
 	res, _ := proto.Marshal(message)
 	return e.Blob(code, "application/vnd.google.protobuf; proto=xsuportal.proto.Error", res)
+}
+func makeClarificationPBfromTeamPB(db sqlx.Queryer, c *xsuportal.Clarification, t *resourcespb.Team) (*resourcespb.Clarification, error) {
+	pb := &resourcespb.Clarification{
+		Id:        c.ID,
+		TeamId:    c.TeamID,
+		Answered:  c.AnsweredAt.Valid,
+		Disclosed: c.Disclosed.Bool,
+		Question:  c.Question.String,
+		Answer:    c.Answer.String,
+		CreatedAt: timestamppb.New(c.CreatedAt),
+		Team:      t,
+	}
+	if c.AnsweredAt.Valid {
+		pb.AnsweredAt = timestamppb.New(c.AnsweredAt.Time)
+	}
+	return pb, nil
 }
 
 func makeClarificationPB(db sqlx.Queryer, c *xsuportal.Clarification, t *xsuportal.Team) (*resourcespb.Clarification, error) {
