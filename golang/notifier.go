@@ -99,63 +99,57 @@ func (n *Notifier) NotifyClarificationAnswered(db sqlx.Ext, c *Clarification, up
 		notificationPBs[contestant.ID] = notificationPB
 	}
 
-	_, err := n.bulkNotify(db, notificationPBs)
-	if err != nil {
-		return fmt.Errorf("notify: %w", err)
-	}
+	go func() {
+		_, err := n.bulkNotify(db, notificationPBs)
+		if err != nil {
+			log.Println("notify: ", err)
+		}
+	}()
 	return nil
 }
 
 func (n *Notifier) bulkNotify(db sqlx.Ext, notificationPBs map[string]*resources.Notification) (*Notification, error) {
+	now := time.Now().Round(time.Microsecond)
+	nows := make([]interface{}, 0, 2 * len(notificationPBs))
 	values := ""
-	for i, v := range notificationPBs {
+	for k, v := range notificationPBs {
 		m, err := proto.Marshal(v)
 		if err != nil {
 			return nil, fmt.Errorf("marshal notification: %w", err)
 		}
 		encodedMessage := base64.StdEncoding.EncodeToString(m)
-		values += fmt.Sprintf("('%s', '%s', TRUE, NOW(6), NOW(6)),", i, encodedMessage)
+		values += fmt.Sprintf("('%s', '%s', TRUE, ?, ?),", k, encodedMessage)
+		nows = append(nows, now, now)
 	}
 	values = values[:len(values)-1]
 	query := "INSERT INTO `notifications` (`contestant_id`, `encoded_message`, `read`, `created_at`, `updated_at`) VALUES " + values
-	fmt.Println(query)
 
 	res, err := db.Exec(
 		query,
+		nows...,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("insert notification: %w", err)
 	}
 	lastInsertID, _ := res.LastInsertId()
 	for i, v := range notificationPBs {
-		var notification Notification
-		err = sqlx.Get(
-			db,
-			&notification,
-			"SELECT * FROM `notifications` WHERE `contestant_id` = ? AND id >= ? LIMIT 1",
-			i,
-			lastInsertID,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("get inserted notification: %w", err)
-		}
+		v.Id = lastInsertID
+		v.CreatedAt = timestamppb.New(now)
 
-		v.Id = notification.ID
-		v.CreatedAt = timestamppb.New(notification.CreatedAt)
-
-		subscriptions, err := getPushSubscriptionsSF(db, i)
+		subscriptions, err := getPushSubscriptions(db, i)
 		if err != nil {
 			return nil, fmt.Errorf("get push subscriptions: %w", err)
 		}
 
 		for _, subscription := range subscriptions {
-			err = n.SendWebPush(v, &subscription)
-			if err != nil {
-				log.Println("send webpush(bulk): ", err)
+			go func(rn *resources.Notification, s PushSubscription) {
+				err = n.SendWebPush(rn, &s)
+				if err != nil {
+					log.Println("send webpush: ", err)
+				}
 				db.Exec("UPDATE `notifications` SET `read` = FALSE where id = ?", v.Id)
-			}
+			}(v, subscription)
 		}
-
 	}
 	return nil, nil
 }
@@ -174,6 +168,7 @@ func (n *Notifier) NotifyBenchmarkJobFinished(db sqlx.Ext, job *BenchmarkJob) er
 	if err != nil {
 		return fmt.Errorf("select contestants(team_id=%v): %w", job.TeamID, err)
 	}
+	notificationPBs := make(map[string]*resources.Notification)
 	for _, contestant := range contestants {
 		notificationPB := &resources.Notification{
 			Content: &resources.Notification_ContentBenchmarkJob{
@@ -182,16 +177,14 @@ func (n *Notifier) NotifyBenchmarkJobFinished(db sqlx.Ext, job *BenchmarkJob) er
 				},
 			},
 		}
-		notification, err := n.notify(db, notificationPB, contestant.ID)
-		if err != nil {
-			return fmt.Errorf("notify: %w", err)
-		}
-		if n.VAPIDKey() != nil {
-			notificationPB.Id = notification.ID
-			notificationPB.CreatedAt = timestamppb.New(notification.CreatedAt)
-			// TODO: Web Push IIKANJI NI SHITE
-		}
+		notificationPBs[contestant.ID] = notificationPB
 	}
+	go func() {
+		_, err := n.bulkNotify(db, notificationPBs)
+		if err != nil {
+			log.Println("notify: ", err)
+		}
+	}()
 	return nil
 }
 
@@ -269,38 +262,31 @@ func getPushSubscriptions(db sqlx.Queryer, contestantID string) ([]PushSubscript
 	return val.([]PushSubscription), nil
 }
 
-func (n *Notifier) notify(db sqlx.Ext, notificationPB *resources.Notification, contestantID string) (*Notification, error) {
+func (n *Notifier) notify(db sqlx.Ext, notificationPB *resources.Notification, contestantID string) error {
 	m, err := proto.Marshal(notificationPB)
 	if err != nil {
-		return nil, fmt.Errorf("marshal notification: %w", err)
+		return fmt.Errorf("marshal notification: %w", err)
 	}
 	encodedMessage := base64.StdEncoding.EncodeToString(m)
+	now := time.Now().Round(time.Microsecond)
 	res, err := db.Exec(
-		"INSERT INTO `notifications` (`contestant_id`, `encoded_message`, `read`, `created_at`, `updated_at`) VALUES (?, ?, TRUE, NOW(6), NOW(6))",
+		"INSERT INTO `notifications` (`contestant_id`, `encoded_message`, `read`, `created_at`, `updated_at`) VALUES (?, ?, TRUE, ?, ?)",
 		contestantID,
 		encodedMessage,
+		now,
+		now,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("insert notification: %w", err)
+		return fmt.Errorf("insert notification: %w", err)
 	}
 	lastInsertID, _ := res.LastInsertId()
-	var notification Notification
-	err = sqlx.Get(
-		db,
-		&notification,
-		"SELECT * FROM `notifications` WHERE `id` = ? LIMIT 1",
-		lastInsertID,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("get inserted notification: %w", err)
-	}
 
-	notificationPB.Id = notification.ID
-	notificationPB.CreatedAt = timestamppb.New(notification.CreatedAt)
+	notificationPB.Id = lastInsertID
+	notificationPB.CreatedAt = timestamppb.New(now)
 
-	subscriptions, err := getPushSubscriptionsSF(db, contestantID)
+	subscriptions, err := getPushSubscriptions(db, contestantID)
 	if err != nil {
-		return nil, fmt.Errorf("get push subscriptions: %w", err)
+		return fmt.Errorf("get push subscriptions: %w", err)
 	}
 
 	go func() {
@@ -315,5 +301,5 @@ func (n *Notifier) notify(db sqlx.Ext, notificationPB *resources.Notification, c
 		}
 	}()
 
-	return &notification, nil
+	return nil
 }
