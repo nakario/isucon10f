@@ -289,7 +289,7 @@ func pollBenchmarkJob() (*xsuportal.BenchmarkJob, error) {
 func benchMain() {
 	go func() { log.Println(http.ListenAndServe(":9009", nil)) }()
 
-	jobs = make([]*xsuportal.JobResult, 2000)
+	jobs = make([]*xsuportal.JobResult, 0, 2000)
 
 	// benchmark job queue
 	port := util.GetEnv("PORT", "50051")
