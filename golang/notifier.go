@@ -143,13 +143,11 @@ func (n *Notifier) bulkNotify(db sqlx.Ext, notificationPBs map[string]*resources
 
 		for _, subscription := range subscriptions {
 			go func(rn *resources.Notification, s PushSubscription) {
-				for i := 0; i < 3; i++ {
-					err = n.SendWebPush(rn, &s)
-					if err != nil {
-						log.Println("send webpush: ", err)
-					}
-					time.Sleep(100 * time.Millisecond)
+				err = n.SendWebPush(rn, &s)
+				if err != nil {
+					log.Println("send webpush: ", err)
 				}
+				db.Exec("UPDATE `notifications` SET `read` = FALSE where id = ?", v.Id)
 			}(v, subscription)
 		}
 	}
@@ -243,18 +241,25 @@ func getPushSubscriptionsSF(db sqlx.Queryer, contestantID string) ([]PushSubscri
 	return v.([]PushSubscription), nil
 }
 
+var PushSubscriptions sync.Map
+
 func getPushSubscriptions(db sqlx.Queryer, contestantID string) ([]PushSubscription, error) {
-	var subscriptions []PushSubscription
-	err := sqlx.Select(
-		db,
-		&subscriptions,
-		"SELECT * FROM `push_subscriptions` WHERE `contestant_id` = ?",
-		contestantID,
-	)
-	if err != sql.ErrNoRows && err != nil {
-		return nil, fmt.Errorf("select push subscriptions: %w", err)
+	val, ok := PushSubscriptions.Load(contestantID)
+	if !ok {
+		var subscriptions []PushSubscription
+		err := sqlx.Select(
+			db,
+			&subscriptions,
+			"SELECT * FROM `push_subscriptions` WHERE `contestant_id` = ?",
+			contestantID,
+		)
+		if err != sql.ErrNoRows && err != nil {
+			return nil, fmt.Errorf("select push subscriptions: %w", err)
+		}
+		PushSubscriptions.Store(contestantID, subscriptions)
+		return subscriptions, nil
 	}
-	return subscriptions, nil
+	return val.([]PushSubscription), nil
 }
 
 func (n *Notifier) notify(db sqlx.Ext, notificationPB *resources.Notification, contestantID string) error {

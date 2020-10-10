@@ -36,8 +36,7 @@ func (b *benchmarkQueueService) Svc() *bench.BenchmarkQueueService {
 }
 
 func (b *benchmarkQueueService) ReceiveBenchmarkJob(ctx context.Context, req *bench.ReceiveBenchmarkJobRequest) (*bench.ReceiveBenchmarkJobResponse, error) {
-	var jobHandle *bench.ReceiveBenchmarkJobResponse_JobHandle
-
+	jobResponse := &bench.ReceiveBenchmarkJobResponse{}
 
 	var err error = sql.ErrNoRows // Any non-nil error
 	var contestStartsAt time.Time
@@ -77,7 +76,7 @@ func (b *benchmarkQueueService) ReceiveBenchmarkJob(ctx context.Context, req *be
 				return false, fmt.Errorf("update benchmark job status: %w", err)
 			}
 
-			jobHandle = &bench.ReceiveBenchmarkJobResponse_JobHandle{
+			jobResponse.JobHandle = &bench.ReceiveBenchmarkJobResponse_JobHandle{
 				JobId:            job.ID,
 				Handle:           handle,
 				TargetHostname:   job.TargetHostName,
@@ -93,12 +92,10 @@ func (b *benchmarkQueueService) ReceiveBenchmarkJob(ctx context.Context, req *be
 			break
 		}
 	}
-	if jobHandle != nil {
-		log.Printf("[DEBUG] Dequeued: job_handle=%+v", jobHandle)
+	if jobResponse.JobHandle != nil {
+		log.Printf("[DEBUG] Dequeued: job_handle=%+v", jobResponse.JobHandle)
 	}
-	return &bench.ReceiveBenchmarkJobResponse{
-		JobHandle: jobHandle,
-	}, nil
+	return jobResponse, nil
 }
 
 type benchmarkReportService struct {
@@ -232,12 +229,13 @@ func (b *benchmarkReportService) saveAsRunning(db sqlx.Execer, job *xsuportal.Be
 }
 
 func pollBenchmarkJob() (*xsuportal.BenchmarkJob, error) {
-	job := <- jobQueue
+	job := <-jobQueue
 	return &job, nil
 }
 
 func benchMain() {
 	go func() { log.Println(http.ListenAndServe(":9009", nil)) }()
+	// benchmark job queue
 	port := util.GetEnv("PORT", "50051")
 	address := ":" + port
 
