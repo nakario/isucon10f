@@ -166,6 +166,7 @@ func (b *benchmarkReportService) ReportBenchmarkResult(srv bench.BenchmarkReport
 			if err := notifier.NotifyBenchmarkJobFinished(db, &job); err != nil {
 				return fmt.Errorf("notify benchmark job finished: %w", err)
 			}
+			contestantLeaderboardGroup.Forget("0")
 			return nil
 		}()
 		if err != nil {

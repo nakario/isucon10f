@@ -158,6 +158,7 @@ func (*AdminService) Initialize(e echo.Context) error {
 
 	close(jobQueue)
 	jobQueue = make(chan xsuportal.BenchmarkJob, 1000)
+	contestantLeaderboardGroup.Forget("0")
 
 	queries := []string{
 		"TRUNCATE `teams`",
@@ -627,51 +628,18 @@ func (*ContestantService) RequestClarification(e echo.Context) error {
 	})
 }
 
-var finishedJobCount int = 0
-var leaderboardCache *resourcespb.Leaderboard
-
 func (*ContestantService) Dashboard(e echo.Context) error {
 	if ok, err := loginRequired(e, db, &loginRequiredOption{Team: true}); !ok {
 		return wrapError("check session", err)
 	}
-	team, _ := getCurrentTeam(e, db, false)
+	contestant, _ := getCurrentContestant(e, db, false)
 
-	contestStatus, err := getCurrentContestStatus(db)
+	res, err := makeContestantLeaderboardPBProto(contestant.TeamID.Int64)
 	if err != nil {
-		return fmt.Errorf("get current contest status: %w", err)
-	}
-	contestFinished := contestStatus.Status == resourcespb.Contest_FINISHED
-	contestFreezesAt := contestStatus.ContestFreezesAt
-	if contestFinished || time.Now().Before(contestFreezesAt) {
-		fmt.Println("koko")
-		var tmpFinishedJobCount int
-		db.Get(&tmpFinishedJobCount, "SELECT count(*) from benchmark_jobs where finished_at IS NOT NULL")
-		if tmpFinishedJobCount == finishedJobCount && leaderboardCache != nil {
-			fmt.Println("success cache!")
-			return writeProto(e, http.StatusOK, &contestantpb.DashboardResponse{
-				Leaderboard: leaderboardCache,
-			})
-		} else {
-			leaderboard, err := makeLeaderboardPB(team.ID)
-			if err != nil {
-				return fmt.Errorf("make leaderboard: %w", err)
-			}
-			leaderboardCache = leaderboard
-			finishedJobCount = tmpFinishedJobCount
-			return writeProto(e, http.StatusOK, &contestantpb.DashboardResponse{
-				Leaderboard: leaderboard,
-			})
-		}
-	} else {
-		leaderboard, err := makeLeaderboardPB(team.ID)
-		if err != nil {
-			return fmt.Errorf("make leaderboard: %w", err)
-		}
-		return writeProto(e, http.StatusOK, &contestantpb.DashboardResponse{
-			Leaderboard: leaderboard,
-		})
+		return fmt.Errorf("makeContestantLeaderboardPBProto: %w", err)
 	}
 
+	return writeRes(e, http.StatusOK, res)
 }
 
 func (*ContestantService) ListNotifications(e echo.Context) error {
@@ -1505,7 +1473,29 @@ func makePublicLeaderboardPBProto() ([]byte, error) {
 		return nil, err
 	}
 	if shared {
-		log.Println("PublicLeaderboard shared cache!")
+		log.Println("[DEBUG] PublicLeaderboard shared cache!")
+	}
+	return v.([]byte), nil
+}
+
+var contestantLeaderboardGroup = &singleflight.Group{}
+
+func makeContestantLeaderboardPBProto(teamID int64) ([]byte, error) {
+	v, err, shared := contestantLeaderboardGroup.Do("0", func() (interface{}, error) {
+		lb, err := makeLeaderboardPB(teamID)
+		if err != nil {
+			return nil, err
+		}
+		res, _ := proto.Marshal(&contestantpb.DashboardResponse{
+			Leaderboard: lb,
+		})
+		return res, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if shared {
+		log.Println("[DEBUG] ContestantLeaderboard shared cache!")
 	}
 	return v.([]byte), nil
 }
