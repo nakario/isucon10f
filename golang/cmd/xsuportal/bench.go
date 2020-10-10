@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	_ "net/http/pprof"
+	"os"
 	"strconv"
 	"sync"
 	"time"
@@ -110,6 +111,16 @@ func (b *benchmarkReportService) Svc() *bench.BenchmarkReportService {
 	}
 }
 
+var reportLogger *log.Logger
+
+func init() {
+	logf, err := os.OpenFile("/home/isucon/report.log", os.O_CREATE|os.O_WRONLY, 0666)
+	if err != nil {
+		log.Fatal(err)
+	}
+	reportLogger = log.New(logf, "", 0)
+}
+
 func (b *benchmarkReportService) ReportBenchmarkResult(srv bench.BenchmarkReport_ReportBenchmarkResultServer) error {
 	var notifier xsuportal.Notifier
 	for {
@@ -122,17 +133,36 @@ func (b *benchmarkReportService) ReportBenchmarkResult(srv bench.BenchmarkReport
 		}
 
 		err = func() error {
+			var a, b2, c, d, e, f, g, h, z time.Time
+			a = time.Now()
+			b2, c, d, e, f, g, h, z = a, a, a, a, a, a, a, a
+			defer func(){
+				z = time.Now()
+				reportLogger.Printf(
+					"a\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n",
+					b2.Sub(a).Milliseconds(),
+					c.Sub(b2).Milliseconds(),
+					d.Sub(c).Milliseconds(),
+					e.Sub(d).Milliseconds(),
+					f.Sub(e).Milliseconds(),
+					g.Sub(f).Milliseconds(),
+					h.Sub(g).Milliseconds(),
+					z.Sub(a).Milliseconds(),
+				)
+			}()
 			key := strconv.Itoa(int(req.JobId)) + ":" + req.Handle
 			if !req.Result.Finished {
 				BenchResultMap.Store(key, req.Result.MarkedAt.AsTime().Round(time.Microsecond))
 				return nil
 			}
+			b2 = time.Now()
 
 			tx, err := db.Beginx()
 			if err != nil {
 				return fmt.Errorf("begin tx: %w", err)
 			}
 			defer tx.Rollback()
+			c = time.Now()
 
 			var job xsuportal.BenchmarkJob
 			err = tx.Get(
@@ -148,6 +178,7 @@ func (b *benchmarkReportService) ReportBenchmarkResult(srv bench.BenchmarkReport
 			if err != nil {
 				return fmt.Errorf("get benchmark job: %w", err)
 			}
+			d = time.Now()
 
 			v, ok := BenchResultMap.Load(key)
 			if !ok {
@@ -155,17 +186,21 @@ func (b *benchmarkReportService) ReportBenchmarkResult(srv bench.BenchmarkReport
 			}
 			job.StartedAt.Scan(v.(time.Time))
 			BenchResultMap.Delete(key)
+			e = time.Now()
 
 			log.Printf("[DEBUG] %v: save as finished", req.JobId)
 			if err := b.saveAsFinished(tx, &job, req); err != nil {
 				return err
 			}
+			f = time.Now()
 			if err := tx.Commit(); err != nil {
 				return fmt.Errorf("commit tx: %w", err)
 			}
+			g = time.Now()
 			if err := notifier.NotifyBenchmarkJobFinished(db, &job); err != nil {
 				return fmt.Errorf("notify benchmark job finished: %w", err)
 			}
+			h = time.Now()
 			return nil
 		}()
 		if err != nil {
