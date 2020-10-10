@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	_ "net/http/pprof"
+	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -28,6 +29,8 @@ import (
 
 var jobQueue = make(chan xsuportal.BenchmarkJob, 1000)
 var BenchResultMap sync.Map
+
+var jobs []*xsuportal.JobResult
 
 type benchmarkQueueService struct {
 }
@@ -214,6 +217,14 @@ func (b *benchmarkReportService) saveAsFinished(db sqlx.Ext, job *xsuportal.Benc
 		return fmt.Errorf("update benchmark job status: %w", err)
 	}
 
+	jobResult := &xsuportal.JobResult{}
+	jobResult.FinishedAt = job.StartedAt.Time
+	jobResult.Score = int64(raw.Int32 - deduction.Int32)
+	jobs = append(jobs, jobResult)
+	sort.SliceStable(jobs, func(i, j int) bool {
+		return jobs[i].FinishedAt.Before(jobs[j].FinishedAt)
+	})
+
 	status, err := getCurrentContestStatus(db)
 	if err != nil {
 		return fmt.Errorf("get contest status: %w", err)
@@ -277,6 +288,9 @@ func pollBenchmarkJob() (*xsuportal.BenchmarkJob, error) {
 
 func benchMain() {
 	go func() { log.Println(http.ListenAndServe(":9009", nil)) }()
+
+	jobs = make([]*xsuportal.JobResult, 2000)
+
 	// benchmark job queue
 	port := util.GetEnv("PORT", "50051")
 	address := ":" + port
