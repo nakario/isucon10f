@@ -10,6 +10,8 @@ import (
 	"net"
 	"net/http"
 	_ "net/http/pprof"
+	"strconv"
+	"sync"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -25,6 +27,7 @@ import (
 )
 
 var jobQueue = make(chan xsuportal.BenchmarkJob, 1000)
+var BenchResultMap sync.Map
 
 type benchmarkQueueService struct {
 }
@@ -119,6 +122,12 @@ func (b *benchmarkReportService) ReportBenchmarkResult(srv bench.BenchmarkReport
 		}
 
 		err = func() error {
+			key := strconv.Itoa(int(req.JobId)) + ":" + req.Handle
+			if !req.Result.Finished {
+				BenchResultMap.Store(key, req.Result.MarkedAt.AsTime().Round(time.Microsecond))
+				return nil
+			}
+
 			tx, err := db.Beginx()
 			if err != nil {
 				return fmt.Errorf("begin tx: %w", err)
@@ -139,25 +148,23 @@ func (b *benchmarkReportService) ReportBenchmarkResult(srv bench.BenchmarkReport
 			if err != nil {
 				return fmt.Errorf("get benchmark job: %w", err)
 			}
-			if req.Result.Finished {
-				log.Printf("[DEBUG] %v: save as finished", req.JobId)
-				if err := b.saveAsFinished(tx, &job, req); err != nil {
-					return err
-				}
-				if err := tx.Commit(); err != nil {
-					return fmt.Errorf("commit tx: %w", err)
-				}
-				if err := notifier.NotifyBenchmarkJobFinished(db, &job); err != nil {
-					return fmt.Errorf("notify benchmark job finished: %w", err)
-				}
-			} else {
-				log.Printf("[DEBUG] %v: save as running", req.JobId)
-				if err := b.saveAsRunning(tx, &job, req); err != nil {
-					return err
-				}
-				if err := tx.Commit(); err != nil {
-					return fmt.Errorf("commit tx: %w", err)
-				}
+
+			v, ok := BenchResultMap.Load(key)
+			if !ok {
+				return status.Errorf(codes.FailedPrecondition, "Job %v has already finished or has not started yet", req.JobId)
+			}
+			job.StartedAt.Scan(v.(time.Time))
+			BenchResultMap.Delete(key)
+
+			log.Printf("[DEBUG] %v: save as finished", req.JobId)
+			if err := b.saveAsFinished(tx, &job, req); err != nil {
+				return err
+			}
+			if err := tx.Commit(); err != nil {
+				return fmt.Errorf("commit tx: %w", err)
+			}
+			if err := notifier.NotifyBenchmarkJobFinished(db, &job); err != nil {
+				return fmt.Errorf("notify benchmark job finished: %w", err)
 			}
 			return nil
 		}()
@@ -191,12 +198,13 @@ func (b *benchmarkReportService) saveAsFinished(db sqlx.Execer, job *xsuportal.B
 		deduction.Int32 = int32(result.ScoreBreakdown.Deduction)
 	}
 	_, err := db.Exec(
-		"UPDATE `benchmark_jobs` SET `status` = ?, `score_raw` = ?, `score_deduction` = ?, `passed` = ?, `reason` = ?, `updated_at` = NOW(6), `finished_at` = ? WHERE `id` = ? LIMIT 1",
+		"UPDATE `benchmark_jobs` SET `status` = ?, `score_raw` = ?, `score_deduction` = ?, `passed` = ?, `reason` = ?, `updated_at` = NOW(6), `started_at` = ?, `finished_at` = ? WHERE `id` = ? LIMIT 1",
 		resources.BenchmarkJob_FINISHED,
 		raw,
 		deduction,
 		result.Passed,
 		result.Reason,
+		job.StartedAt.Time,
 		markedAt,
 		req.JobId,
 	)
