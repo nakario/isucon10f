@@ -146,8 +146,8 @@ func (n *Notifier) bulkNotify(db sqlx.Ext, notificationPBs map[string]*resources
 				err = n.SendWebPush(rn, &s)
 				if err != nil {
 					log.Println("send webpush: ", err)
+					db.Exec("UPDATE `notifications` SET `read` = FALSE where id = ?", v.Id)
 				}
-				db.Exec("UPDATE `notifications` SET `read` = FALSE where id = ?", v.Id)
 			}(v, subscription)
 		}
 	}
