@@ -21,7 +21,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/getlantern/deepcopy"
 	"github.com/go-sql-driver/mysql"
 	"github.com/golang/protobuf/proto"
 	"github.com/gorilla/sessions"
@@ -668,24 +667,24 @@ func (*ContestantService) Dashboard(e echo.Context) error {
 		}
 	} else if contestStatus.Status == resourcespb.Contest_STARTED && time.Now().After(contestFreezesAt) { // freeze
 		val, ok := freezeLeaderBoard.Load("freeze")
-		var leaderboard *resourcespb.Leaderboard
 		if !ok {
-			leaderboard, err = makeLeaderboardPB(team.ID)
+			leaderboard, err := makeLeaderboardPB(team.ID)
 			if err != nil {
 				return fmt.Errorf("make leaderboard: %w", err)
 			}
 			freezeLeaderBoard.Store("freeze", leaderboard)
-		} else {
-			var copyLeaderboard resourcespb.Leaderboard
-			deepcopy.Copy(&copyLeaderboard, val.(*resourcespb.Leaderboard))
-			updateLeaderboardPB(team.ID, &copyLeaderboard)
 			return writeProto(e, http.StatusOK, &contestantpb.DashboardResponse{
-				Leaderboard: &copyLeaderboard,
+				Leaderboard: leaderboard,
+			})
+		} else {
+			leaderboard, err := updateLeaderboardPB(team.ID, val.(*resourcespb.Leaderboard))
+			if err != nil {
+				return fmt.Errorf("make leaderboard: %w", err)
+			}
+			return writeProto(e, http.StatusOK, &contestantpb.DashboardResponse{
+				Leaderboard: leaderboard,
 			})
 		}
-		return writeProto(e, http.StatusOK, &contestantpb.DashboardResponse{
-			Leaderboard: leaderboard,
-		})
 	} else {
 		leaderboard, err := makeLeaderboardPB(team.ID)
 		if err != nil {
@@ -698,16 +697,16 @@ func (*ContestantService) Dashboard(e echo.Context) error {
 
 }
 
-func updateLeaderboardPB(teamID int64, leaderboard *resourcespb.Leaderboard) error {
+func updateLeaderboardPB(teamID int64, leaderboard *resourcespb.Leaderboard) (*resourcespb.Leaderboard, error) {
 	contestStatus, err := getCurrentContestStatus(db)
 	if err != nil {
-		return fmt.Errorf("get current contest status: %w", err)
+		return nil, fmt.Errorf("get current contest status: %w", err)
 	}
 	contestFinished := contestStatus.Status == resourcespb.Contest_FINISHED
 
 	tx, err := db.Beginx()
 	if err != nil {
-		return fmt.Errorf("begin tx: %w", err)
+		return nil, fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback()
 	var leaderboardByTeam []xsuportal.LeaderBoardTeam
@@ -742,7 +741,7 @@ func updateLeaderboardPB(teamID int64, leaderboard *resourcespb.Leaderboard) err
 		"WHERE `l`.`team_id` = ? AND `l`.`private`\n"
 	err = tx.Select(&leaderboardByTeam, query, teamID, contestFinished)
 	if err != sql.ErrNoRows && err != nil {
-		return fmt.Errorf("select leaderboard: %w", err)
+		return nil, fmt.Errorf("select leaderboard: %w", err)
 	}
 	jobResultsQuery := "SELECT\n" +
 		"  `team_id` AS `team_id`,\n" +
@@ -763,10 +762,10 @@ func updateLeaderboardPB(teamID int64, leaderboard *resourcespb.Leaderboard) err
 	var jobResults []xsuportal.JobResult
 	err = tx.Select(&jobResults, jobResultsQuery, teamID)
 	if err != sql.ErrNoRows && err != nil {
-		return fmt.Errorf("select job results: %w", err)
+		return nil, fmt.Errorf("select job results: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit tx: %w", err)
+		return nil, fmt.Errorf("commit tx: %w", err)
 	}
 	teamGraphScores := make(map[int64][]*resourcespb.Leaderboard_LeaderboardItem_LeaderboardScore)
 	for _, jobResult := range jobResults {
@@ -776,37 +775,74 @@ func updateLeaderboardPB(teamID int64, leaderboard *resourcespb.Leaderboard) err
 			MarkedAt:  timestamppb.New(jobResult.FinishedAt),
 		})
 	}
-	for _, team := range leaderboardByTeam {
-		t, _ := makeTeamPB(db, team.Team(), false, false)
-		item := &resourcespb.Leaderboard_LeaderboardItem{
-			Scores: teamGraphScores[team.ID],
-			BestScore: &resourcespb.Leaderboard_LeaderboardItem_LeaderboardScore{
-				Score:     team.BestScore.Int64,
-				StartedAt: toTimestamp(team.BestScoreStartedAt),
-				MarkedAt:  toTimestamp(team.BestScoreMarkedAt),
-			},
-			LatestScore: &resourcespb.Leaderboard_LeaderboardItem_LeaderboardScore{
-				Score:     team.LatestScore.Int64,
-				StartedAt: toTimestamp(team.LatestScoreStartedAt),
-				MarkedAt:  toTimestamp(team.LatestScoreMarkedAt),
-			},
-			Team:        t,
-			FinishCount: team.FinishCount.Int64,
-		}
-		for i, v := range leaderboard.Teams {
-			if v.Team.Id == teamID {
-				leaderboard.Teams[i] = item
+	pb := &resourcespb.Leaderboard{}
+	for _, team := range leaderboard.Teams {
+		if team.Team.Id != teamID {
+			pb.Teams = append(pb.Teams, team)
+		} else {
+			t, _ := makeTeamPB(db, leaderboardByTeam[0].Team(), false, false)
+			item := &resourcespb.Leaderboard_LeaderboardItem{
+				Scores: teamGraphScores[teamID],
+				BestScore: &resourcespb.Leaderboard_LeaderboardItem_LeaderboardScore{
+					Score:     leaderboardByTeam[0].BestScore.Int64,
+					StartedAt: toTimestamp(leaderboardByTeam[0].BestScoreStartedAt),
+					MarkedAt:  toTimestamp(leaderboardByTeam[0].BestScoreMarkedAt),
+				},
+				LatestScore: &resourcespb.Leaderboard_LeaderboardItem_LeaderboardScore{
+					Score:     leaderboardByTeam[0].LatestScore.Int64,
+					StartedAt: toTimestamp(leaderboardByTeam[0].LatestScoreStartedAt),
+					MarkedAt:  toTimestamp(leaderboardByTeam[0].LatestScoreMarkedAt),
+				},
+				Team:        t,
+				FinishCount: leaderboardByTeam[0].FinishCount.Int64,
 			}
+			pb.Teams = append(pb.Teams, item)
 		}
-		for i, v := range leaderboard.StudentTeams {
-			if v.Team.Id == teamID {
-				leaderboard.StudentTeams[i] = item
+	}
+	for _, team := range leaderboard.StudentTeams {
+		if team.Team.Id != teamID {
+			pb.StudentTeams = append(pb.StudentTeams, team)
+		} else {
+			t, _ := makeTeamPB(db, leaderboardByTeam[0].Team(), false, false)
+			item := &resourcespb.Leaderboard_LeaderboardItem{
+				Scores: teamGraphScores[teamID],
+				BestScore: &resourcespb.Leaderboard_LeaderboardItem_LeaderboardScore{
+					Score:     leaderboardByTeam[0].BestScore.Int64,
+					StartedAt: toTimestamp(leaderboardByTeam[0].BestScoreStartedAt),
+					MarkedAt:  toTimestamp(leaderboardByTeam[0].BestScoreMarkedAt),
+				},
+				LatestScore: &resourcespb.Leaderboard_LeaderboardItem_LeaderboardScore{
+					Score:     leaderboardByTeam[0].LatestScore.Int64,
+					StartedAt: toTimestamp(leaderboardByTeam[0].LatestScoreStartedAt),
+					MarkedAt:  toTimestamp(leaderboardByTeam[0].LatestScoreMarkedAt),
+				},
+				Team:        t,
+				FinishCount: leaderboardByTeam[0].FinishCount.Int64,
 			}
+			pb.StudentTeams = append(pb.StudentTeams, item)
 		}
-		for i, v := range leaderboard.GeneralTeams {
-			if v.Team.Id == teamID {
-				leaderboard.GeneralTeams[i] = item
+	}
+	for _, team := range leaderboard.GeneralTeams {
+		if team.Team.Id != teamID {
+			pb.GeneralTeams = append(pb.GeneralTeams, team)
+		} else {
+			t, _ := makeTeamPB(db, leaderboardByTeam[0].Team(), false, false)
+			item := &resourcespb.Leaderboard_LeaderboardItem{
+				Scores: teamGraphScores[teamID],
+				BestScore: &resourcespb.Leaderboard_LeaderboardItem_LeaderboardScore{
+					Score:     leaderboardByTeam[0].BestScore.Int64,
+					StartedAt: toTimestamp(leaderboardByTeam[0].BestScoreStartedAt),
+					MarkedAt:  toTimestamp(leaderboardByTeam[0].BestScoreMarkedAt),
+				},
+				LatestScore: &resourcespb.Leaderboard_LeaderboardItem_LeaderboardScore{
+					Score:     leaderboardByTeam[0].LatestScore.Int64,
+					StartedAt: toTimestamp(leaderboardByTeam[0].LatestScoreStartedAt),
+					MarkedAt:  toTimestamp(leaderboardByTeam[0].LatestScoreMarkedAt),
+				},
+				Team:        t,
+				FinishCount: leaderboardByTeam[0].FinishCount.Int64,
 			}
+			pb.GeneralTeams = append(pb.GeneralTeams, item)
 		}
 	}
 	sort.SliceStable(leaderboard.Teams, func(i, j int) bool {
@@ -836,7 +872,7 @@ func updateLeaderboardPB(teamID int64, leaderboard *resourcespb.Leaderboard) err
 			return false
 		}
 	})
-	return nil
+	return pb, nil
 }
 
 func (*ContestantService) ListNotifications(e echo.Context) error {
