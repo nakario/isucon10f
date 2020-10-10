@@ -249,6 +249,8 @@ func (b *benchmarkReportService) saveAsFinished(db sqlx.Ext, job *xsuportal.Benc
 		return fmt.Errorf("update leaderboard: %w", err)
 	}
 	jobResult := &xsuportal.JobResult{}
+	jobResult.TeamID = job.TeamID
+	jobResult.StartedAt = job.StartedAt.Time
 	jobResult.FinishedAt = markedAt
 	jobResult.Score = int64(raw.Int32 - deduction.Int32)
 	jobs = append(jobs, jobResult)
