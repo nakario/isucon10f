@@ -219,8 +219,8 @@ func (b *benchmarkReportService) saveAsFinished(db sqlx.Ext, job *xsuportal.Benc
 	// -> private OR NOT freezing
 	_, err = db.Exec(
 		"UPDATE `leaderboard` SET " +
-		"`best_score` = IF(`best_score` <= ?, ?, `best_score`), " +
-		"`best_score_job_id` = IF(`best_score` <= ?, ?, `best_score_job_id`), " +
+		"`best_score` = IF(`best_score` > ?, `best_score`, ?), " +
+		"`best_score_job_id` = IF(`best_score` > ?, `best_score_job_id`, ?), " +
 		"`latest_score` = ?, " +
 		"`latest_score_job_id` = ?, " +
 		"`finish_count` = `finish_count` + 1 " +
