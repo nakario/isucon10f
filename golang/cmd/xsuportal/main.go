@@ -1580,6 +1580,9 @@ func makeLeaderboardPB(teamID int64) (*resourcespb.Leaderboard, error) {
 		"  `finished_at`"
 	var jobResults2 []xsuportal.JobResult
 	err = tx.Select(&jobResults2, jobResultsQuery, teamID, teamID, contestFinished, contestFreezesAt)
+	if err != sql.ErrNoRows && err != nil {
+		return nil, fmt.Errorf("select leaderboard: %w", err)
+	}
 
 	var jobResults []xsuportal.JobResult
 	for _, j := range jobs {
