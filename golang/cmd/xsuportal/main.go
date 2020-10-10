@@ -1551,7 +1551,7 @@ func makeLeaderboardPB(teamID int64) (*resourcespb.Leaderboard, error) {
 		"      `contestants`\n" +
 		"    GROUP BY\n" +
 		"      `contestants`.`team_id`\n" +
-		"  ) `team_student_flags` ON `team_student_flags`.`team_id` = `teams`.`id`\n" +
+		"  ) `team_student_flags` ON `team_student_flags`.`team_id` = `t`.`id`\n" +
 		"WHERE `l`.`private` = ((`l`.`team_id` = ?) OR ?)\n" +
 		"ORDER BY\n" +
 		"  `latest_score` DESC,\n" +
