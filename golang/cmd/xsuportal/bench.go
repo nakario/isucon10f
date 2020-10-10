@@ -180,7 +180,7 @@ func (b *benchmarkReportService) ReportBenchmarkResult(srv bench.BenchmarkReport
 	}
 }
 
-func (b *benchmarkReportService) saveAsFinished(db sqlx.Execer, job *xsuportal.BenchmarkJob, req *bench.ReportBenchmarkResultRequest) error {
+func (b *benchmarkReportService) saveAsFinished(db sqlx.Ext, job *xsuportal.BenchmarkJob, req *bench.ReportBenchmarkResultRequest) error {
 	if !job.StartedAt.Valid || job.FinishedAt.Valid {
 		return status.Errorf(codes.FailedPrecondition, "Job %v has already finished or has not started yet", req.JobId)
 	}
@@ -190,12 +190,14 @@ func (b *benchmarkReportService) saveAsFinished(db sqlx.Execer, job *xsuportal.B
 	markedAt := req.Result.MarkedAt.AsTime().Round(time.Microsecond)
 
 	result := req.Result
+	var score int32
 	var raw, deduction sql.NullInt32
 	if result.ScoreBreakdown != nil {
 		raw.Valid = true
 		raw.Int32 = int32(result.ScoreBreakdown.Raw)
 		deduction.Valid = true
 		deduction.Int32 = int32(result.ScoreBreakdown.Deduction)
+		score = raw.Int32 - deduction.Int32
 	}
 	_, err := db.Exec(
 		"UPDATE `benchmark_jobs` SET `status` = ?, `score_raw` = ?, `score_deduction` = ?, `passed` = ?, `reason` = ?, `updated_at` = NOW(6), `started_at` = ?, `finished_at` = ? WHERE `id` = ? LIMIT 1",
@@ -210,6 +212,38 @@ func (b *benchmarkReportService) saveAsFinished(db sqlx.Execer, job *xsuportal.B
 	)
 	if err != nil {
 		return fmt.Errorf("update benchmark job status: %w", err)
+	}
+
+	status, err := getCurrentContestStatus(db)
+	if err != nil {
+		return fmt.Errorf("get contest status: %w", err)
+	}
+
+	// private freezing update
+	//    TRUE     TRUE   TRUE
+	//    TRUE    FALSE   TRUE
+	//   FALSE     TRUE  FALSE
+	//   FALSE    FALSE   TRUE
+	// -> private OR NOT freezing
+	_, err = db.Exec(
+		"UPDATE `leaderboard` SET " +
+		"`best_score` = IF(`best_score` > ?, `best_score`, ?), " +
+		"`best_score_job_id` = IF(`best_score` > ?, `best_score_job_id`, ?), " +
+		"`latest_score` = ?, " +
+		"`latest_score_job_id` = ?, " +
+		"`finish_count` = `finish_count` + 1 " +
+		"WHERE `team_id` = ? AND (`private` OR NOT ?)",
+		score,
+		score,
+		score,
+		job.ID,
+		score,
+		job.ID,
+		job.TeamID,
+		status.ContestFreezesAt.Before(markedAt), // freezing
+	)
+	if err != nil {
+		return fmt.Errorf("update leaderboard: %w", err)
 	}
 	return nil
 }

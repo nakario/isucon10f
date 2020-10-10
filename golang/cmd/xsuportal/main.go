@@ -167,6 +167,7 @@ func (*AdminService) Initialize(e echo.Context) error {
 		"TRUNCATE `notifications`",
 		"TRUNCATE `push_subscriptions`",
 		"TRUNCATE `contest_config`",
+		"TRUNCATE `leaderboard`",
 	}
 	for _, query := range queries {
 		_, err := db.Exec(query)
@@ -935,7 +936,7 @@ func (*RegistrationService) CreateTeam(e echo.Context) error {
 	}
 	defer conn.Close()
 
-	_, err = conn.ExecContext(ctx, "LOCK TABLES `teams` WRITE, `contestants` WRITE")
+	_, err = conn.ExecContext(ctx, "LOCK TABLES `teams` WRITE, `contestants` WRITE, `leaderboard` WRITE")
 	if err != nil {
 		return fmt.Errorf("lock tables: %w", err)
 	}
@@ -1000,6 +1001,16 @@ func (*RegistrationService) CreateTeam(e echo.Context) error {
 	)
 	if err != nil {
 		return fmt.Errorf("update team: %w", err)
+	}
+
+	_, err = conn.ExecContext(
+		ctx,
+		"INSERT INTO `leaderboard` (`team_id`, `private`) VALUES (?, TRUE), (?, FALSE)",
+		teamID,
+		teamID,
+	)
+	if err != nil {
+		return fmt.Errorf("insert leaderboard: %w", err)
 	}
 
 	return writeProto(e, http.StatusOK, &registrationpb.CreateTeamResponse{
@@ -1514,61 +1525,23 @@ func makeLeaderboardPB(teamID int64) (*resourcespb.Leaderboard, error) {
 	defer tx.Rollback()
 	var leaderboard []xsuportal.LeaderBoardTeam
 	query := "SELECT\n" +
-		"  `teams`.`id` AS `id`,\n" +
-		"  `teams`.`name` AS `name`,\n" +
-		"  `teams`.`leader_id` AS `leader_id`,\n" +
-		"  `teams`.`withdrawn` AS `withdrawn`,\n" +
+		"  `t`.`id` AS `id`,\n" +
+		"  `t`.`name` AS `name`,\n" +
+		"  `t`.`leader_id` AS `leader_id`,\n" +
+		"  `t`.`withdrawn` AS `withdrawn`,\n" +
 		"  `team_student_flags`.`student` AS `student`,\n" +
-		"  (`best_score_jobs`.`score_raw` - `best_score_jobs`.`score_deduction`) AS `best_score`,\n" +
+		"  `l`.`best_score` AS `best_score`,\n" +
 		"  `best_score_jobs`.`started_at` AS `best_score_started_at`,\n" +
 		"  `best_score_jobs`.`finished_at` AS `best_score_marked_at`,\n" +
-		"  (`latest_score_jobs`.`score_raw` - `latest_score_jobs`.`score_deduction`) AS `latest_score`,\n" +
+		"  `l`.`latest_score` AS `latest_score`,\n" +
 		"  `latest_score_jobs`.`started_at` AS `latest_score_started_at`,\n" +
 		"  `latest_score_jobs`.`finished_at` AS `latest_score_marked_at`,\n" +
-		"  `latest_score_job_ids`.`finish_count` AS `finish_count`\n" +
+		"  `l`.`finish_count` AS `finish_count`\n" +
 		"FROM\n" +
-		"  `teams`\n" +
-		"  -- latest scores\n" +
-		"  LEFT JOIN (\n" +
-		"    SELECT\n" +
-		"      MAX(`id`) AS `id`,\n" +
-		"      `team_id`,\n" +
-		"      COUNT(*) AS `finish_count`\n" +
-		"    FROM\n" +
-		"      `benchmark_jobs`\n" +
-		"    WHERE\n" +
-		"      `finished_at` IS NOT NULL\n" +
-		"      -- score freeze\n" +
-		"      AND (`team_id` = ? OR (`team_id` != ? AND (? = TRUE OR `finished_at` < ?)))\n" +
-		"    GROUP BY\n" +
-		"      `team_id`\n" +
-		"  ) `latest_score_job_ids` ON `latest_score_job_ids`.`team_id` = `teams`.`id`\n" +
-		"  LEFT JOIN `benchmark_jobs` `latest_score_jobs` ON `latest_score_job_ids`.`id` = `latest_score_jobs`.`id`\n" +
-		"  -- best scores\n" +
-		"  LEFT JOIN (\n" +
-		"    SELECT\n" +
-		"      MAX(`j`.`id`) AS `id`,\n" +
-		"      `j`.`team_id` AS `team_id`\n" +
-		"    FROM\n" +
-		"      (\n" +
-		"        SELECT\n" +
-		"          `team_id`,\n" +
-		"          MAX(`score_raw` - `score_deduction`) AS `score`\n" +
-		"        FROM\n" +
-		"          `benchmark_jobs`\n" +
-		"        WHERE\n" +
-		"          `finished_at` IS NOT NULL\n" +
-		"          -- score freeze\n" +
-		"          AND (`team_id` = ? OR (`team_id` != ? AND (? = TRUE OR `finished_at` < ?)))\n" +
-		"        GROUP BY\n" +
-		"          `team_id`\n" +
-		"      ) `best_scores`\n" +
-		"      LEFT JOIN `benchmark_jobs` `j` ON (`j`.`score_raw` - `j`.`score_deduction`) = `best_scores`.`score`\n" +
-		"        AND `j`.`team_id` = `best_scores`.`team_id`\n" +
-		"    GROUP BY\n" +
-		"      `j`.`team_id`\n" +
-		"  ) `best_score_job_ids` ON `best_score_job_ids`.`team_id` = `teams`.`id`\n" +
-		"  LEFT JOIN `benchmark_jobs` `best_score_jobs` ON `best_score_jobs`.`id` = `best_score_job_ids`.`id`\n" +
+		"  `leaderboard` AS `l`\n" +
+		"  LEFT JOIN `teams` AS `t` ON `t`.`id` = `l`.`team_id`\n" +
+		"  LEFT JOIN `benchmark_jobs` AS `best_score_jobs` ON `best_score_jobs`.`id` = `l`.`best_score_job_id`\n" +
+		"  LEFT JOIN `benchmark_jobs` AS `latest_score_jobs` ON `latest_score_jobs`.`id` = `l`.`latest_score_job_id`\n" +
 		"  -- check student teams\n" +
 		"  LEFT JOIN (\n" +
 		"    SELECT\n" +
@@ -1578,11 +1551,12 @@ func makeLeaderboardPB(teamID int64) (*resourcespb.Leaderboard, error) {
 		"      `contestants`\n" +
 		"    GROUP BY\n" +
 		"      `contestants`.`team_id`\n" +
-		"  ) `team_student_flags` ON `team_student_flags`.`team_id` = `teams`.`id`\n" +
+		"  ) `team_student_flags` ON `team_student_flags`.`team_id` = `t`.`id`\n" +
+		"WHERE `l`.`private` = ((`l`.`team_id` = ?) OR ?)\n" +
 		"ORDER BY\n" +
 		"  `latest_score` DESC,\n" +
 		"  `latest_score_marked_at` ASC\n"
-	err = tx.Select(&leaderboard, query, teamID, teamID, contestFinished, contestFreezesAt, teamID, teamID, contestFinished, contestFreezesAt)
+	err = tx.Select(&leaderboard, query, teamID, contestFinished)
 	if err != sql.ErrNoRows && err != nil {
 		return nil, fmt.Errorf("select leaderboard: %w", err)
 	}
