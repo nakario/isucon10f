@@ -183,12 +183,14 @@ func (b *benchmarkReportService) saveAsFinished(db sqlx.Ext, job *xsuportal.Benc
 	markedAt := req.Result.MarkedAt.AsTime().Round(time.Microsecond)
 
 	result := req.Result
+	var score int32
 	var raw, deduction sql.NullInt32
 	if result.ScoreBreakdown != nil {
 		raw.Valid = true
 		raw.Int32 = int32(result.ScoreBreakdown.Raw)
 		deduction.Valid = true
 		deduction.Int32 = int32(result.ScoreBreakdown.Deduction)
+		score = raw.Int32 - deduction.Int32
 	}
 	_, err := db.Exec(
 		"UPDATE `benchmark_jobs` SET `status` = ?, `score_raw` = ?, `score_deduction` = ?, `passed` = ?, `reason` = ?, `updated_at` = NOW(6), `finished_at` = ? WHERE `id` = ? LIMIT 1",
@@ -223,11 +225,11 @@ func (b *benchmarkReportService) saveAsFinished(db sqlx.Ext, job *xsuportal.Benc
 		"`latest_score_job_id` = ?, " +
 		"`finish_count` = `finish_count` + 1 " +
 		"WHERE `team_id` = ? AND (`private` OR NOT ?)",
-		result.ScoreBreakdown.Raw - result.ScoreBreakdown.Deduction,
-		result.ScoreBreakdown.Raw - result.ScoreBreakdown.Deduction,
-		result.ScoreBreakdown.Raw - result.ScoreBreakdown.Deduction,
+		score,
+		score,
+		score,
 		job.ID,
-		result.ScoreBreakdown.Raw - result.ScoreBreakdown.Deduction,
+		score,
 		job.ID,
 		job.TeamID,
 		status.ContestFreezesAt.Before(markedAt), // freezing
