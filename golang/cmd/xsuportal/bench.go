@@ -123,16 +123,10 @@ func (b *benchmarkReportService) ReportBenchmarkResult(srv bench.BenchmarkReport
 				return nil
 			}
 
-			tx, err := db.Beginx()
-			if err != nil {
-				return fmt.Errorf("begin tx: %w", err)
-			}
-			defer tx.Rollback()
-
 			var job xsuportal.BenchmarkJob
-			err = tx.Get(
+			err = db.Get(
 				&job,
-				"SELECT * FROM `benchmark_jobs` WHERE `id` = ? AND `handle` = ? LIMIT 1 FOR UPDATE",
+				"SELECT * FROM `benchmark_jobs` WHERE `id` = ? AND `handle` = ? LIMIT 1",
 				req.JobId,
 				req.Handle,
 			)
@@ -152,11 +146,8 @@ func (b *benchmarkReportService) ReportBenchmarkResult(srv bench.BenchmarkReport
 			BenchResultMap.Delete(key)
 
 			log.Printf("[DEBUG] %v: save as finished", req.JobId)
-			if err := b.saveAsFinished(tx, &job, req); err != nil {
+			if err := b.saveAsFinished(db, &job, req); err != nil {
 				return err
-			}
-			if err := tx.Commit(); err != nil {
-				return fmt.Errorf("commit tx: %w", err)
 			}
 			if err := notifier.NotifyBenchmarkJobFinished(db, &job); err != nil {
 				return fmt.Errorf("notify benchmark job finished: %w", err)
