@@ -463,12 +463,12 @@ func (*ContestantService) EnqueueBenchmarkJob(e echo.Context) error {
 		return fmt.Errorf("enqueued last benchmark id: %w", err)
 	}
 	var job = xsuportal.BenchmarkJob{
-		ID: id,
-		TeamID: team.ID,
+		ID:             id,
+		TeamID:         team.ID,
 		TargetHostName: req.TargetHostname,
-		Status: int(resourcespb.BenchmarkJob_PENDING),
-		UpdatedAt: now,
-		CreatedAt: now,
+		Status:         int(resourcespb.BenchmarkJob_PENDING),
+		UpdatedAt:      now,
+		CreatedAt:      now,
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit tx: %w", err)
@@ -984,11 +984,6 @@ func (*RegistrationService) CreateTeam(e echo.Context) error {
 	)
 	if err != nil {
 		return fmt.Errorf("update contestant: %w", err)
-	}
-
-	ok, err = contestStatusRestricted(e, db, resourcespb.Contest_REGISTRATION, "チーム登録期間ではありません")
-	if !ok {
-		return wrapError("check contest status", err)
 	}
 
 	_, err = conn.ExecContext(
