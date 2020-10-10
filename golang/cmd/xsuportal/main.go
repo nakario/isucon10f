@@ -1552,10 +1552,11 @@ func makeLeaderboardPB(teamID int64) (*resourcespb.Leaderboard, error) {
 		"    GROUP BY\n" +
 		"      `contestants`.`team_id`\n" +
 		"  ) `team_student_flags` ON `team_student_flags`.`team_id` = `teams`.`id`\n" +
+		"WHERE `l`.`private` = ((`l`.`team_id` = ?) OR ?)\n" +
 		"ORDER BY\n" +
 		"  `latest_score` DESC,\n" +
 		"  `latest_score_marked_at` ASC\n"
-	err = tx.Select(&leaderboard, query, teamID, teamID, contestFinished, contestFreezesAt, teamID, teamID, contestFinished, contestFreezesAt)
+	err = tx.Select(&leaderboard, query, teamID, contestFinished)
 	if err != sql.ErrNoRows && err != nil {
 		return nil, fmt.Errorf("select leaderboard: %w", err)
 	}
