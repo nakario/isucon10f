@@ -239,7 +239,7 @@ func (*AdminService) ListClarifications(e echo.Context) error {
 		T xsuportal.Team `db:"t"`
 	}
 	var clarifications []ClarificationWithTeam
-	err := db.Select(&clarifications, "SELECT" +
+	err := db.Select(&clarifications, "SELECT " +
 		"c.id AS `c.id`, c.team_id AS `c.team_id`, c.disclosed AS `c.disclosed`, c.question AS `c.question`, c.answer AS `c.answer`, c.answered_at AS `c.answered_at`, c.created_at AS `c.created_at`, c.updated_at AS `c.updated_at`, " +
 		"t.id AS `t.id`, t.name AS `t.name`, t.leader_id AS `t.leader_id`, t.email_address AS `t.email_address`, t.invite_token AS `t.invite_token`, t.withdrawn AS `t.withdrawn`, t.created_at AS `t.created_at` " +
 		"FROM `clarifications` AS c INNER JOIN `teams` AS t ON `t.id` = `c.team_id` ORDER BY `c.updated_at` DESC")
