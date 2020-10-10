@@ -42,7 +42,7 @@ func (b *benchmarkQueueService) ReceiveBenchmarkJob(ctx context.Context, req *be
 	jobResponse := &bench.ReceiveBenchmarkJobResponse{}
 
 	var defaultTime time.Time
-	for contestStartsAt != defaultTime {
+	for contestStartsAt == defaultTime {
 		time.Sleep(100 * time.Millisecond)
 	}
 
