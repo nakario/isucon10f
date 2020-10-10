@@ -839,29 +839,29 @@ func updateLeaderboardPB(teamID int64, leaderboard *resourcespb.Leaderboard) (*r
 			pb.GeneralTeams = append(pb.GeneralTeams, item)
 		}
 	}
-	sort.SliceStable(leaderboard.Teams, func(i, j int) bool {
-		if leaderboard.Teams[i].LatestScore.Score > leaderboard.Teams[j].LatestScore.Score {
+	sort.SliceStable(pb.Teams, func(i, j int) bool {
+		if pb.Teams[i].LatestScore.Score > pb.Teams[j].LatestScore.Score {
 			return true
-		} else if leaderboard.Teams[i].LatestScore.Score == leaderboard.Teams[j].LatestScore.Score {
-			return leaderboard.Teams[i].LatestScore.MarkedAt.AsTime().Before(leaderboard.Teams[j].LatestScore.MarkedAt.AsTime())
+		} else if pb.Teams[i].LatestScore.Score == pb.Teams[j].LatestScore.Score {
+			return pb.Teams[i].LatestScore.MarkedAt.AsTime().Before(pb.Teams[j].LatestScore.MarkedAt.AsTime())
 		} else {
 			return false
 		}
 	})
-	sort.SliceStable(leaderboard.GeneralTeams, func(i, j int) bool {
-		if leaderboard.GeneralTeams[i].LatestScore.Score > leaderboard.GeneralTeams[j].LatestScore.Score {
+	sort.SliceStable(pb.GeneralTeams, func(i, j int) bool {
+		if pb.GeneralTeams[i].LatestScore.Score > pb.GeneralTeams[j].LatestScore.Score {
 			return true
-		} else if leaderboard.GeneralTeams[i].LatestScore.Score == leaderboard.GeneralTeams[j].LatestScore.Score {
-			return leaderboard.GeneralTeams[i].LatestScore.MarkedAt.AsTime().Before(leaderboard.GeneralTeams[j].LatestScore.MarkedAt.AsTime())
+		} else if pb.GeneralTeams[i].LatestScore.Score == pb.GeneralTeams[j].LatestScore.Score {
+			return pb.GeneralTeams[i].LatestScore.MarkedAt.AsTime().Before(pb.GeneralTeams[j].LatestScore.MarkedAt.AsTime())
 		} else {
 			return false
 		}
 	})
-	sort.SliceStable(leaderboard.StudentTeams, func(i, j int) bool {
-		if leaderboard.StudentTeams[i].LatestScore.Score > leaderboard.StudentTeams[j].LatestScore.Score {
+	sort.SliceStable(pb.StudentTeams, func(i, j int) bool {
+		if pb.StudentTeams[i].LatestScore.Score > pb.StudentTeams[j].LatestScore.Score {
 			return true
-		} else if leaderboard.StudentTeams[i].LatestScore.Score == leaderboard.StudentTeams[j].LatestScore.Score {
-			return leaderboard.StudentTeams[i].LatestScore.MarkedAt.AsTime().Before(leaderboard.StudentTeams[j].LatestScore.MarkedAt.AsTime())
+		} else if pb.StudentTeams[i].LatestScore.Score == pb.StudentTeams[j].LatestScore.Score {
+			return pb.StudentTeams[i].LatestScore.MarkedAt.AsTime().Before(pb.StudentTeams[j].LatestScore.MarkedAt.AsTime())
 		} else {
 			return false
 		}
