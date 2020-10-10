@@ -218,7 +218,7 @@ func (b *benchmarkReportService) saveAsFinished(db sqlx.Ext, job *xsuportal.Benc
 	}
 
 	jobResult := &xsuportal.JobResult{}
-	jobResult.FinishedAt = job.StartedAt.Time
+	jobResult.FinishedAt = markedAt
 	jobResult.Score = int64(raw.Int32 - deduction.Int32)
 	jobs = append(jobs, jobResult)
 	sort.SliceStable(jobs, func(i, j int) bool {
