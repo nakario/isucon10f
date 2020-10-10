@@ -5,9 +5,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/base64"
-	"encoding/binary"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"net"
 	"net/http"
@@ -26,7 +24,7 @@ import (
 	"github.com/isucon/isucon10-final/webapp/golang/util"
 )
 
-var db *sqlx.DB
+var jobQueue = make(chan xsuportal.BenchmarkJob, 1000)
 
 type benchmarkQueueService struct {
 }
@@ -39,45 +37,60 @@ func (b *benchmarkQueueService) Svc() *bench.BenchmarkQueueService {
 
 func (b *benchmarkQueueService) ReceiveBenchmarkJob(ctx context.Context, req *bench.ReceiveBenchmarkJobRequest) (*bench.ReceiveBenchmarkJobResponse, error) {
 	jobResponse := &bench.ReceiveBenchmarkJobResponse{}
-	var job xsuportal.BenchmarkJob
 
-	randomBytes := make([]byte, 16)
-	_, err := rand.Read(randomBytes)
-	if err != nil {
-		return jobResponse, fmt.Errorf("read random: %w", err)
-	}
-	handle := base64.StdEncoding.EncodeToString(randomBytes)
-	jobID := <-jobQue
-	_, err = db.Exec(
-		"UPDATE `benchmark_jobs` SET `status` = ?, `handle` = ? WHERE `id` = ? AND `status` = ? LIMIT 1",
-		resources.BenchmarkJob_SENT,
-		handle,
-		jobID,
-		resources.BenchmarkJob_PENDING,
-	)
-	if err != nil {
-		return jobResponse, fmt.Errorf("update benchmark job status: %w", err)
-	}
-
+	var err error = sql.ErrNoRows // Any non-nil error
 	var contestStartsAt time.Time
-	err = db.Get(&contestStartsAt, "SELECT `contest_starts_at` FROM `contest_config` LIMIT 1")
-	if err != nil {
-		return jobResponse, fmt.Errorf("get contest starts at: %w", err)
+	for err != nil {
+		err = db.Get(&contestStartsAt, "SELECT `contest_starts_at` FROM `contest_config` LIMIT 1")
+		if err != nil {
+			log.Println("get contest starts at: ", err)
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 
-	err = db.Get(&job, "SELECT * from `benchmark_jobs` where id = ?",
-		jobID,
-	)
-	if err != nil {
-		return jobResponse, fmt.Errorf("get benchmark job: %w", err)
-	}
+	for {
+		next, err := func() (bool, error) {
+			job, err := pollBenchmarkJob()
+			if err != nil {
+				return false, fmt.Errorf("poll benchmark job: %w", err)
+			}
+			if job == nil {
+				return false, nil
+			}
 
-	jobResponse.JobHandle = &bench.ReceiveBenchmarkJobResponse_JobHandle{
-		JobId:            job.ID,
-		Handle:           handle,
-		TargetHostname:   job.TargetHostName,
-		ContestStartedAt: timestamppb.New(contestStartsAt),
-		JobCreatedAt:     timestamppb.New(job.CreatedAt),
+			randomBytes := make([]byte, 16)
+			_, err = rand.Read(randomBytes)
+			if err != nil {
+				return false, fmt.Errorf("read random: %w", err)
+			}
+			handle := base64.StdEncoding.EncodeToString(randomBytes)
+
+			_, err = db.Exec(
+				"UPDATE `benchmark_jobs` SET `status` = ?, `handle` = ? WHERE `id` = ? AND `status` = ? LIMIT 1",
+				resources.BenchmarkJob_SENT,
+				handle,
+				job.ID,
+				resources.BenchmarkJob_PENDING,
+			)
+			if err != nil {
+				return false, fmt.Errorf("update benchmark job status: %w", err)
+			}
+
+			jobResponse.JobHandle = &bench.ReceiveBenchmarkJobResponse_JobHandle{
+				JobId:            job.ID,
+				Handle:           handle,
+				TargetHostname:   job.TargetHostName,
+				ContestStartedAt: timestamppb.New(contestStartsAt),
+				JobCreatedAt:     timestamppb.New(job.CreatedAt),
+			}
+			return false, nil
+		}()
+		if err != nil {
+			return nil, fmt.Errorf("fetch queue: %w", err)
+		}
+		if !next {
+			break
+		}
 	}
 	if jobResponse.JobHandle != nil {
 		log.Printf("[DEBUG] Dequeued: job_handle=%+v", jobResponse.JobHandle)
@@ -215,49 +228,14 @@ func (b *benchmarkReportService) saveAsRunning(db sqlx.Execer, job *xsuportal.Be
 	return nil
 }
 
-func pollBenchmarkJob(db sqlx.Queryer) (*xsuportal.BenchmarkJob, error) {
-	for i := 0; i < 10; i++ {
-		if i >= 1 {
-			time.Sleep(50 * time.Millisecond)
-		}
-		var job xsuportal.BenchmarkJob
-		err := sqlx.Get(
-			db,
-			&job,
-			"SELECT * FROM `benchmark_jobs` WHERE `status` = ? ORDER BY `id` LIMIT 1",
-			resources.BenchmarkJob_PENDING,
-		)
-		if err == sql.ErrNoRows {
-			continue
-		}
-		if err != nil {
-			return nil, fmt.Errorf("get benchmark job: %w", err)
-		}
-		return &job, nil
-	}
-	return nil, nil
+func pollBenchmarkJob() (*xsuportal.BenchmarkJob, error) {
+	job := <-jobQueue
+	return &job, nil
 }
 
-var jobQue chan int64
-
-func main() {
+func benchMain() {
 	go func() { log.Println(http.ListenAndServe(":9009", nil)) }()
 	// benchmark job queue
-	go func() {
-		serverMux := http.NewServeMux()
-		serverMux.HandleFunc("/enque", func(w http.ResponseWriter, req *http.Request) {
-			defer req.Body.Close()
-			body, err := ioutil.ReadAll(req.Body)
-			if err != nil {
-				w.WriteHeader(http.StatusBadRequest)
-				return
-			}
-			jobID := int64(binary.BigEndian.Uint64(body))
-			jobQue <- jobID
-		})
-		log.Println(http.ListenAndServe(":9999", serverMux))
-	}()
-	jobQue = make(chan int64, 1000)
 	port := util.GetEnv("PORT", "50051")
 	address := ":" + port
 
