@@ -698,12 +698,6 @@ func (*ContestantService) Dashboard(e echo.Context) error {
 }
 
 func updateLeaderboardPB(teamID int64, leaderboard *resourcespb.Leaderboard) (*resourcespb.Leaderboard, error) {
-	contestStatus, err := getCurrentContestStatus(db)
-	if err != nil {
-		return nil, fmt.Errorf("get current contest status: %w", err)
-	}
-	contestFinished := contestStatus.Status == resourcespb.Contest_FINISHED
-
 	tx, err := db.Beginx()
 	if err != nil {
 		return nil, fmt.Errorf("begin tx: %w", err)
@@ -739,7 +733,7 @@ func updateLeaderboardPB(teamID int64, leaderboard *resourcespb.Leaderboard) (*r
 		"      `contestants`.`team_id`\n" +
 		"  ) `team_student_flags` ON `team_student_flags`.`team_id` = `t`.`id`\n" +
 		"WHERE `l`.`team_id` = ? AND `l`.`private`\n"
-	err = tx.Select(&leaderboardByTeam, query, teamID, contestFinished)
+	err = tx.Select(&leaderboardByTeam, query, teamID)
 	if err != sql.ErrNoRows && err != nil {
 		return nil, fmt.Errorf("select leaderboard: %w", err)
 	}
