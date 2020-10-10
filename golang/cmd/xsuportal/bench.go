@@ -217,14 +217,6 @@ func (b *benchmarkReportService) saveAsFinished(db sqlx.Ext, job *xsuportal.Benc
 		return fmt.Errorf("update benchmark job status: %w", err)
 	}
 
-	jobResult := &xsuportal.JobResult{}
-	jobResult.FinishedAt = markedAt
-	jobResult.Score = int64(raw.Int32 - deduction.Int32)
-	jobs = append(jobs, jobResult)
-	sort.SliceStable(jobs, func(i, j int) bool {
-		return jobs[i].FinishedAt.Before(jobs[j].FinishedAt)
-	})
-
 	status, err := getCurrentContestStatus(db)
 	if err != nil {
 		return fmt.Errorf("get contest status: %w", err)
@@ -256,6 +248,13 @@ func (b *benchmarkReportService) saveAsFinished(db sqlx.Ext, job *xsuportal.Benc
 	if err != nil {
 		return fmt.Errorf("update leaderboard: %w", err)
 	}
+	jobResult := &xsuportal.JobResult{}
+	jobResult.FinishedAt = markedAt
+	jobResult.Score = int64(raw.Int32 - deduction.Int32)
+	jobs = append(jobs, jobResult)
+	sort.SliceStable(jobs, func(i, j int) bool {
+		return jobs[i].FinishedAt.Before(jobs[j].FinishedAt)
+	})
 	return nil
 }
 
