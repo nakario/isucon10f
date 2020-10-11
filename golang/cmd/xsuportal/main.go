@@ -1591,7 +1591,7 @@ func makeLeaderboardPB(teamID int64) (*resourcespb.Leaderboard, error) {
 	}
 	jobResults := make([]xsuportal.JobResult, 0, 2000)
 	for _, j := range jobResultsCache {
-		if (teamID == j.TeamID || contestFinished || j.FinishedAt.Before(contestFreezesAt)) && !j.FinishedAt.After(newestJobTime) {
+		if teamID == j.TeamID || contestFinished || j.FinishedAt.Before(contestFreezesAt) {
 			jobResults = append(jobResults, *j)
 		}
 	}
