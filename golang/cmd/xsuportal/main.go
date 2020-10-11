@@ -1561,6 +1561,19 @@ func makeLeaderboardPB(teamID int64) (*resourcespb.Leaderboard, error) {
 	if err != sql.ErrNoRows && err != nil {
 		return nil, fmt.Errorf("select leaderboard: %w", err)
 	}
+	var newestJobTime time.Time
+	for _, te := range leaderboard {
+		if newestJobTime.After(te.LatestScoreMarkedAt.Time) {
+			newestJobTime = te.LatestScoreMarkedAt.Time
+		}
+	}
+
+	var jobResults []xsuportal.JobResult
+	for _, j := range jobResultsCache {
+		if (teamID == j.TeamID || contestFinished || j.FinishedAt.Before(contestFreezesAt)) && !j.FinishedAt.After(newestJobTime) {
+			jobResults = append(jobResults, *j)
+		}
+	}
 
 	jobResultsQuery := "SELECT\n" +
 		"  `team_id` AS `team_id`,\n" +
@@ -1582,13 +1595,6 @@ func makeLeaderboardPB(teamID int64) (*resourcespb.Leaderboard, error) {
 	err = tx.Select(&jobResults2, jobResultsQuery, teamID, teamID, contestFinished, contestFreezesAt)
 	if err != sql.ErrNoRows && err != nil {
 		return nil, fmt.Errorf("select leaderboard: %w", err)
-	}
-
-	var jobResults []xsuportal.JobResult
-	for _, j := range jobResultsCache {
-		if teamID == j.TeamID || contestFinished || j.FinishedAt.Before(contestFreezesAt) {
-			jobResults = append(jobResults, *j)
-		}
 	}
 
 	if len(jobResults) != len(jobResults2) {
