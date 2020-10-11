@@ -167,8 +167,10 @@ func (*AdminService) Cache(e echo.Context) error {
 			wg.Done()
 		}()
 	}
+	fmt.Println("wait: ", time.Now())
 	wg.Wait()
-	return nil
+	fmt.Println("finish: ", time.Now())
+	return writeProto(e, http.StatusOK, nil)
 }
 
 func (*AdminService) Initialize(e echo.Context) error {
