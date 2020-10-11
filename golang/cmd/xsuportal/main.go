@@ -181,6 +181,7 @@ func (*AdminService) Initialize(e echo.Context) error {
 	}
 
 	xsuportal.ContestantServer.FlushAll()
+	xsuportal.ClarificationServer.FlushAll()
 
 	xsuportal.PushSubscriptionGroup = &singleflight.Group{}
 
