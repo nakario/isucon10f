@@ -1269,10 +1269,27 @@ func (*AudienceService) ListTeams(e echo.Context) error {
 	return writeProto(e, http.StatusOK, res)
 }
 
+const freezingEtag = "freezing"
+
 func (*AudienceService) Dashboard(e echo.Context) error {
+	contest, err := getCurrentContestStatus(db)
+	if err != nil {
+		return fmt.Errorf("get contest: %w", err)
+	}
+	freezing := contest.ContestFreezesAt.Before(contest.CurrentTime) && contest.CurrentTime.Before(contest.ContestEndsAt)
+	if freezing {
+		etag := e.Request().Header.Get("ETag")
+		if etag == freezingEtag {
+			return e.NoContent(http.StatusNotModified)
+		}
+	}
 	res, err := makePublicLeaderboardPBProto()
 	if err != nil {
 		return fmt.Errorf("make leaderboard: %w", err)
+	}
+	if freezing {
+		e.Response().Header().Add("ETag", freezingEtag)
+		e.Response().Header().Add("Cache-Control", "private, must-relalidate, max-age=0")
 	}
 	return writeRes(e, http.StatusOK, res)
 }
