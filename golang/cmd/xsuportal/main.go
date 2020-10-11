@@ -1567,12 +1567,8 @@ func makeLeaderboardPB(teamID int64) (*resourcespb.Leaderboard, error) {
 			newestJobTime = te.LatestScoreMarkedAt.Time
 		}
 	}
-
 	jobResultsQuery := "SELECT\n" +
-		"  `team_id` AS `team_id`,\n" +
-		"  (`score_raw` - `score_deduction`) AS `score`,\n" +
-		"  `started_at` AS `started_at`,\n" +
-		"  `finished_at` AS `finished_at`\n" +
+		"count(*)\n" +
 		"FROM\n" +
 		"  `benchmark_jobs`\n" +
 		"WHERE\n" +
@@ -1584,10 +1580,10 @@ func makeLeaderboardPB(teamID int64) (*resourcespb.Leaderboard, error) {
 		"  )\n" +
 		"ORDER BY\n" +
 		"  `finished_at`"
-	var jobResults2 []xsuportal.JobResult
+	var jobResults2 int64
 	err = tx.Select(&jobResults2, jobResultsQuery, teamID, teamID, contestFinished, contestFreezesAt)
 	if err != sql.ErrNoRows && err != nil {
-		return nil, fmt.Errorf("select leaderboard: %w", err)
+		return nil, fmt.Errorf("select job results: %w", err)
 	}
 	jobResults := make([]xsuportal.JobResult, 0, 2000)
 	for _, j := range jobResultsCache {
@@ -1595,14 +1591,7 @@ func makeLeaderboardPB(teamID int64) (*resourcespb.Leaderboard, error) {
 			jobResults = append(jobResults, *j)
 		}
 	}
-
-	if len(jobResults) != len(jobResults2) {
-		fmt.Println("diff len: ", len(jobResults), len(jobResults2))
-	}
-
-	for i := 0; i < len(jobResults); i++ {
-		fmt.Println("diff result: ", jobResults[i], jobResults2[i])
-	}
+	jobResults = jobResults[:jobResults2]
 
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit tx: %w", err)
