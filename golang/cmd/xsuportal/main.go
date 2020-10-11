@@ -1079,6 +1079,9 @@ func (*RegistrationService) JoinTeam(e echo.Context) error {
 	}
 
 	contestant, _ := getCurrentContestant(e, tx, false)
+	contestant.TeamID.Scan(req.TeamId)
+	contestant.Name.Scan(req.Name)
+	contestant.Student = req.IsStudent
 	xsuportal.ContestantServer.Set(contestant.ID, contestant)
 	member = append(member, contestant.ID)
 	xsuportal.ContestantServer.Set(strconv.FormatInt(req.TeamId, 10), member)
