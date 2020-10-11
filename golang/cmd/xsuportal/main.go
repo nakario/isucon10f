@@ -1589,7 +1589,7 @@ func makeLeaderboardPB(teamID int64) (*resourcespb.Leaderboard, error) {
 	if err != sql.ErrNoRows && err != nil {
 		return nil, fmt.Errorf("select leaderboard: %w", err)
 	}
-	var jobResults []xsuportal.JobResult
+	jobResults := make([]xsuportal.JobResult, 0, 2000)
 	for _, j := range jobResultsCache {
 		if (teamID == j.TeamID || contestFinished || j.FinishedAt.Before(contestFreezesAt)) && !j.FinishedAt.After(newestJobTime) {
 			jobResults = append(jobResults, *j)
