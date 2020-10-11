@@ -773,7 +773,6 @@ func (*ContestantService) Login(e echo.Context) error {
 	if err := e.Bind(&req); err != nil {
 		return err
 	}
-	var password string
 	var contestant xsuportal.Contestant
 	ok := xsuportal.ContestantServer.Get(req.ContestantId, &contestant)
 	// err := db.Get(
@@ -787,6 +786,7 @@ func (*ContestantService) Login(e echo.Context) error {
 	if !ok {
 		return halt(e, http.StatusBadRequest, "ログインIDまたはパスワードが正しくありません", nil)
 	}
+	password := contestant.Password
 	passwordHash := sha256.Sum256([]byte(req.Password))
 	digest := hex.EncodeToString(passwordHash[:])
 	if subtle.ConstantTimeCompare([]byte(digest), []byte(password)) == 1 {
