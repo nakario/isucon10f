@@ -1269,7 +1269,7 @@ func (*AudienceService) ListTeams(e echo.Context) error {
 	return writeProto(e, http.StatusOK, res)
 }
 
-const freezingEtag = "freezing"
+const freezingEtag = `"freezing"`
 
 func (*AudienceService) Dashboard(e echo.Context) error {
 	contest, err := getCurrentContestStatus(db)
@@ -1278,7 +1278,7 @@ func (*AudienceService) Dashboard(e echo.Context) error {
 	}
 	freezing := contest.ContestFreezesAt.Before(contest.CurrentTime) && contest.CurrentTime.Before(contest.ContestEndsAt)
 	if freezing {
-		etag := e.Request().Header.Get("ETag")
+		etag := e.Request().Header.Get("If-None-Match")
 		if etag == freezingEtag {
 			return e.NoContent(http.StatusNotModified)
 		}
