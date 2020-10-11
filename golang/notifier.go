@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"strconv"
 	"sync"
 	"time"
 
@@ -66,24 +67,56 @@ func (n *Notifier) NotifyClarificationAnswered(db sqlx.Ext, c *Clarification, up
 		TeamID int64  `db:"team_id"`
 	}
 	if c.Disclosed.Valid && c.Disclosed.Bool {
-		err := sqlx.Select(
-			db,
-			&contestants,
-			"SELECT `id`, `team_id` FROM `contestants` WHERE `team_id` IS NOT NULL",
-		)
-		if err != nil {
-			return fmt.Errorf("select all contestants: %w", err)
+		keys := ContestantServer.AllKeys()
+		teamIDs := make([]string, 0, 100)
+		for _, v := range keys {
+			// contestantID is string, teamID is int
+			_, err := strconv.ParseInt(v, 10, 64)
+			if err == nil { // if key is teamID
+				teamIDs = append(teamIDs, v)
+			}
 		}
+		result := ContestantServer.MGet(teamIDs)
+		for _, v := range teamIDs {
+			memberIDs := make([]string, 0, 3)
+			result.Get(v, &memberIDs)
+			for _, id := range memberIDs {
+				teamID, _ := strconv.ParseInt(v, 10, 64)
+				contestants = append(contestants,
+					struct {
+						ID     string `db:"id"`
+						TeamID int64  `db:"team_id"`
+					}{ID: id, TeamID: teamID})
+
+			}
+		}
+		// err := sqlx.Select(
+		// 	db,
+		// 	&contestants,
+		// 	"SELECT `id`, `team_id` FROM `contestants` WHERE `team_id` IS NOT NULL",
+		// )
+		// if err != nil {
+		// 	return fmt.Errorf("select all contestants: %w", err)
+		// }
 	} else {
-		err := sqlx.Select(
-			db,
-			&contestants,
-			"SELECT `id`, `team_id` FROM `contestants` WHERE `team_id` = ?",
-			c.TeamID,
-		)
-		if err != nil {
-			return fmt.Errorf("select contestants(team_id=%v): %w", c.TeamID, err)
+		memberIDs := make([]string, 0, 3)
+		ContestantServer.Get(strconv.FormatInt(c.TeamID, 10), &memberIDs)
+		for _, v := range memberIDs {
+			contestants = append(contestants,
+				struct {
+					ID     string `db:"id"`
+					TeamID int64  `db:"team_id"`
+				}{ID: v, TeamID: c.TeamID})
 		}
+		// err := sqlx.Select(
+		// 	db,
+		// 	&contestants,
+		// 	"SELECT `id`, `team_id` FROM `contestants` WHERE `team_id` = ?",
+		// 	c.TeamID,
+		// )
+		// if err != nil {
+		// 	return fmt.Errorf("select contestants(team_id=%v): %w", c.TeamID, err)
+		// }
 	}
 	notificationPBs := make(map[string]*resources.Notification)
 	for _, contestant := range contestants {
@@ -110,7 +143,7 @@ func (n *Notifier) NotifyClarificationAnswered(db sqlx.Ext, c *Clarification, up
 
 func (n *Notifier) bulkNotify(db sqlx.Ext, notificationPBs map[string]*resources.Notification) (*Notification, error) {
 	now := time.Now().Round(time.Microsecond)
-	nows := make([]interface{}, 0, 2 * len(notificationPBs))
+	nows := make([]interface{}, 0, 2*len(notificationPBs))
 	values := ""
 	for k, v := range notificationPBs {
 		m, err := proto.Marshal(v)
@@ -159,15 +192,24 @@ func (n *Notifier) NotifyBenchmarkJobFinished(db sqlx.Ext, job *BenchmarkJob) er
 		ID     string `db:"id"`
 		TeamID int64  `db:"team_id"`
 	}
-	err := sqlx.Select(
-		db,
-		&contestants,
-		"SELECT `id`, `team_id` FROM `contestants` WHERE `team_id` = ?",
-		job.TeamID,
-	)
-	if err != nil {
-		return fmt.Errorf("select contestants(team_id=%v): %w", job.TeamID, err)
+	memberIDs := make([]string, 0, 3)
+	ContestantServer.Get(strconv.FormatInt(job.TeamID, 10), &memberIDs)
+	for _, v := range memberIDs {
+		contestants = append(contestants,
+			struct {
+				ID     string `db:"id"`
+				TeamID int64  `db:"team_id"`
+			}{ID: v, TeamID: job.TeamID})
 	}
+	// err := sqlx.Select(
+	// 	db,
+	// 	&contestants,
+	// 	"SELECT `id`, `team_id` FROM `contestants` WHERE `team_id` = ?",
+	// 	job.TeamID,
+	// )
+	// if err != nil {
+	// 	return fmt.Errorf("select contestants(team_id=%v): %w", job.TeamID, err)
+	// }
 	notificationPBs := make(map[string]*resources.Notification)
 	for _, contestant := range contestants {
 		notificationPB := &resources.Notification{
