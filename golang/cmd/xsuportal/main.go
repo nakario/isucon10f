@@ -1581,7 +1581,7 @@ func makeLeaderboardPB(teamID int64) (*resourcespb.Leaderboard, error) {
 		"ORDER BY\n" +
 		"  `finished_at`"
 	var jobResults2 int64
-	err = tx.Select(&jobResults2, jobResultsQuery, teamID, teamID, contestFinished, contestFreezesAt)
+	err = tx.Get(&jobResults2, jobResultsQuery, teamID, teamID, contestFinished, contestFreezesAt)
 	if err != sql.ErrNoRows && err != nil {
 		return nil, fmt.Errorf("select job results: %w", err)
 	}
