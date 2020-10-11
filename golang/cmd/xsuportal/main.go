@@ -15,6 +15,7 @@ import (
 	"log"
 	"net/http"
 	_ "net/http/pprof"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -303,14 +304,44 @@ func (*AdminService) GetClarification(e echo.Context) error {
 	})
 }
 
+var cLogger *log.Logger
+
+func init() {
+	logf, err := os.Create("/home/isucon/clar.tsv")
+	if err != nil {
+		log.Fatal(err)
+	}
+	cLogger = log.New(logf, "", 0)
+}
+
 func (*AdminService) RespondClarification(e echo.Context) error {
+	var t1, t2, t3, t4, t5, t6, t7, t8, t9, t0 time.Time
+	t1 = time.Now()
+	t2, t3, t4, t5, t6, t7, t8, t9, t0 = t1, t1, t1, t1, t1, t1, t1, t1, t1
+	defer func() {
+		t0 = time.Now()
+		cLogger.Printf(
+			"%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n",
+			t2.Sub(t1).Milliseconds(),
+			t3.Sub(t2).Milliseconds(),
+			t4.Sub(t3).Milliseconds(),
+			t5.Sub(t4).Milliseconds(),
+			t6.Sub(t5).Milliseconds(),
+			t7.Sub(t6).Milliseconds(),
+			t8.Sub(t7).Milliseconds(),
+			t9.Sub(t8).Milliseconds(),
+			t0.Sub(t9).Milliseconds(),
+		)
+	}()
 	if ok, err := loginRequired(e, db, &loginRequiredOption{Staff: true}); !ok {
 		return wrapError("check session", err)
 	}
+	t2 = time.Now()
 	id, err := strconv.Atoi(e.Param("id"))
 	if err != nil {
 		return fmt.Errorf("parse id: %w", err)
 	}
+	t3 = time.Now()
 	var req adminpb.RespondClarificationRequest
 	if err := e.Bind(&req); err != nil {
 		return err
@@ -321,6 +352,7 @@ func (*AdminService) RespondClarification(e echo.Context) error {
 		return fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback()
+	t4 = time.Now()
 
 	var clarificationBefore xsuportal.Clarification
 	err = tx.Get(
@@ -336,6 +368,7 @@ func (*AdminService) RespondClarification(e echo.Context) error {
 	}
 	wasAnswered := clarificationBefore.AnsweredAt.Valid
 	wasDisclosed := clarificationBefore.Disclosed
+	t5 = time.Now()
 
 	now := time.Now().Round(time.Microsecond)
 	_, err = tx.Exec(
@@ -352,6 +385,7 @@ func (*AdminService) RespondClarification(e echo.Context) error {
 		}
 		return fmt.Errorf("update clarification: %w", err)
 	}
+	t6 = time.Now()
 	var clarification xsuportal.Clarification = clarificationBefore
 	clarification.Disclosed.Scan(req.Disclose)
 	clarification.Answer.Scan(req.Answer)
@@ -366,13 +400,16 @@ func (*AdminService) RespondClarification(e echo.Context) error {
 	if err != nil {
 		return fmt.Errorf("get team: %w", err)
 	}
+	t7 = time.Now()
 	c, err := makeClarificationPB(tx, &clarification, &team)
 	if err != nil {
 		return fmt.Errorf("make clarification: %w", err)
 	}
+	t8 = time.Now()
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit tx: %w", err)
 	}
+	t9 = time.Now()
 	go func() {
 		updated := wasAnswered && wasDisclosed == clarification.Disclosed
 		if err := notifier.NotifyClarificationAnswered(db, &clarification, updated); err != nil {
