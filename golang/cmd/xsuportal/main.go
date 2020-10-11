@@ -485,7 +485,7 @@ func (*ContestantService) GetBenchmarkJob(e echo.Context) error {
 }
 
 func (*ContestantService) ListClarifications(e echo.Context) error {
-	if ok, err := loginRequired(e, db, &loginRequiredOption{}); !ok {
+	if ok, err := loginRequired(e, db, &loginRequiredOption{Team: true}); !ok {
 		return wrapError("check session", err)
 	}
 	contestant, _ := getCurrentContestant(e, db, false)
