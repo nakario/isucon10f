@@ -168,6 +168,7 @@ func (*AdminService) Cache(e echo.Context) error {
 		}()
 	}
 	wg.Wait()
+	return nil
 }
 
 func (*AdminService) Initialize(e echo.Context) error {
