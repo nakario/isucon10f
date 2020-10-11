@@ -182,10 +182,17 @@ func (*AdminService) Initialize(e echo.Context) error {
 
 	passwordHash := sha256.Sum256([]byte(AdminPassword))
 	digest := hex.EncodeToString(passwordHash[:])
-	_, err := db.Exec("INSERT `contestants` (`id`, `password`, `staff`, `created_at`) VALUES (?, ?, TRUE, NOW(6))", AdminID, digest)
-	if err != nil {
-		return fmt.Errorf("insert initial contestant: %w", err)
+	contestant := xsuportal.Contestant{
+		ID:        AdminID,
+		Password:  digest,
+		Staff:     true,
+		CreatedAt: time.Now().Round(time.Microsecond),
 	}
+	xsuportal.ContestantServer.Set(AdminID, contestant)
+	// _, err := db.Exec("INSERT `contestants` (`id`, `password`, `staff`, `created_at`) VALUES (?, ?, TRUE, NOW(6))", AdminID, digest)
+	// if err != nil {
+	// 	return fmt.Errorf("insert initial contestant: %w", err)
+	// }
 
 	if req.Contest != nil {
 		freezesAt := req.Contest.ContestFreezesAt.AsTime().Round(time.Microsecond)
@@ -1072,16 +1079,19 @@ func (*RegistrationService) JoinTeam(e echo.Context) error {
 	}
 
 	contestant, _ := getCurrentContestant(e, tx, false)
-	_, err = tx.Exec(
-		"UPDATE `contestants` SET `team_id` = ?, `name` = ?, `student` = ? WHERE `id` = ? LIMIT 1",
-		req.TeamId,
-		req.Name,
-		req.IsStudent,
-		contestant.ID,
-	)
-	if err != nil {
-		return fmt.Errorf("update contestant: %w", err)
-	}
+	xsuportal.ContestantServer.Set(contestant.ID, contestant)
+	member = append(member, contestant.ID)
+	xsuportal.ContestantServer.Set(strconv.FormatInt(req.TeamId, 10), member)
+	// _, err = tx.Exec(
+	// 	"UPDATE `contestants` SET `team_id` = ?, `name` = ?, `student` = ? WHERE `id` = ? LIMIT 1",
+	// 	req.TeamId,
+	// 	req.Name,
+	// 	req.IsStudent,
+	// 	contestant.ID,
+	// )
+	// if err != nil {
+	// 	return fmt.Errorf("update contestant: %w", err)
+	// }
 
 	if !req.IsStudent {
 		_, err = tx.Exec(
@@ -1138,15 +1148,19 @@ func (*RegistrationService) UpdateRegistration(e echo.Context) error {
 			return fmt.Errorf("update non_student_count: %w", err)
 		}
 	}
-	_, err = tx.Exec(
-		"UPDATE `contestants` SET `name` = ?, `student` = ? WHERE `id` = ? LIMIT 1",
-		req.Name,
-		req.IsStudent,
-		contestant.ID,
-	)
-	if err != nil {
-		return fmt.Errorf("update contestant: %w", err)
-	}
+	contestant.Name.Scan(req.Name)
+	contestant.Student = req.IsStudent
+
+	xsuportal.ContestantServer.Set(contestant.ID, contestant)
+	// _, err = tx.Exec(
+	// 	"UPDATE `contestants` SET `name` = ?, `student` = ? WHERE `id` = ? LIMIT 1",
+	// 	req.Name,
+	// 	req.IsStudent,
+	// 	contestant.ID,
+	// )
+	// if err != nil {
+	// 	return fmt.Errorf("update contestant: %w", err)
+	// }
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit tx: %w", err)
 	}
