@@ -994,10 +994,16 @@ func (*RegistrationService) CreateTeam(e echo.Context) error {
 		return fmt.Errorf("update contestant: %w", err)
 	}
 
+	nonStudentCount := 0
+	if !contestant.Student {
+		nonStudentCount = 1
+	}
+
 	_, err = conn.ExecContext(
 		ctx,
-		"UPDATE `teams` SET `leader_id` = ? WHERE `id` = ? LIMIT 1",
+		"UPDATE `teams` SET `leader_id` = ?, `non_student_count` = ? WHERE `id` = ? LIMIT 1",
 		contestant.ID,
+		nonStudentCount,
 		teamID,
 	)
 	if err != nil {
@@ -1073,6 +1079,16 @@ func (*RegistrationService) JoinTeam(e echo.Context) error {
 	if err != nil {
 		return fmt.Errorf("update contestant: %w", err)
 	}
+
+	if !req.IsStudent {
+		_, err = tx.Exec(
+			"UPDATE `teams` SET `non_student_count` = `non_student_count` + 1 WHERE `id` = ? LIMIT 1",
+			req.TeamId,
+		)
+		if err != nil {
+			return fmt.Errorf("update non_student_count: %w", err)
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit tx: %w", err)
 	}
@@ -1103,6 +1119,20 @@ func (*RegistrationService) UpdateRegistration(e echo.Context) error {
 		)
 		if err != nil {
 			return fmt.Errorf("update team: %w", err)
+		}
+	}
+	if contestant.Student != req.IsStudent {
+		nonStudentCountDiff := 1 // true -> false
+		if !contestant.Student && req.IsStudent {
+			nonStudentCountDiff = -1 // false -> true
+		}
+		_, err := tx.Exec(
+			"UPDATE `teams` SET `non_student_count` = `non_student_count` + ? WHERE `id` = ? LIMIT 1",
+			nonStudentCountDiff,
+			team.ID,
+		)
+		if err != nil {
+			return fmt.Errorf("update non_student_count: %w", err)
 		}
 	}
 	_, err = tx.Exec(
@@ -1156,6 +1186,15 @@ func (*RegistrationService) DeleteRegistration(e echo.Context) error {
 		)
 		if err != nil {
 			return fmt.Errorf("withdrawn contestant(id=%v): %w", contestant.ID, err)
+		}
+	}
+	if !contestant.Student {
+		_, err = tx.Exec(
+			"UPDATE `teams` SET `non_student_count` = `non_student_count` - 1 WHERE `id` = ? LIMIT 1",
+			team.ID,
+		)
+		if err != nil {
+			return fmt.Errorf("update non_student_count: %w", err)
 		}
 	}
 	if err := tx.Commit(); err != nil {
@@ -1530,7 +1569,7 @@ func makeLeaderboardPB(teamID int64) (*resourcespb.Leaderboard, error) {
 		"  `t`.`name` AS `name`,\n" +
 		"  `t`.`leader_id` AS `leader_id`,\n" +
 		"  `t`.`withdrawn` AS `withdrawn`,\n" +
-		"  `team_student_flags`.`student` AS `student`,\n" +
+		"  (`t`.`non_student_count` = 0) AS `student`,\n" +
 		"  `l`.`best_score` AS `best_score`,\n" +
 		"  `best_score_jobs`.`started_at` AS `best_score_started_at`,\n" +
 		"  `best_score_jobs`.`finished_at` AS `best_score_marked_at`,\n" +
@@ -1543,16 +1582,6 @@ func makeLeaderboardPB(teamID int64) (*resourcespb.Leaderboard, error) {
 		"  LEFT JOIN `teams` AS `t` ON `t`.`id` = `l`.`team_id`\n" +
 		"  LEFT JOIN `benchmark_jobs` AS `best_score_jobs` ON `best_score_jobs`.`id` = `l`.`best_score_job_id`\n" +
 		"  LEFT JOIN `benchmark_jobs` AS `latest_score_jobs` ON `latest_score_jobs`.`id` = `l`.`latest_score_job_id`\n" +
-		"  -- check student teams\n" +
-		"  LEFT JOIN (\n" +
-		"    SELECT\n" +
-		"      `team_id`,\n" +
-		"      (SUM(`student`) = COUNT(*)) AS `student`\n" +
-		"    FROM\n" +
-		"      `contestants`\n" +
-		"    GROUP BY\n" +
-		"      `contestants`.`team_id`\n" +
-		"  ) `team_student_flags` ON `team_student_flags`.`team_id` = `t`.`id`\n" +
 		"WHERE `l`.`private` = ((`l`.`team_id` = ?) OR ?)\n" +
 		"ORDER BY\n" +
 		"  `latest_score` DESC,\n" +
