@@ -312,8 +312,8 @@ func benchMain() {
 	log.Print("[INFO] listen ", address)
 
 	db, _ = xsuportal.GetDB()
-	db.SetMaxOpenConns(400)
-	db.SetMaxIdleConns(400)
+	db.SetMaxOpenConns(200)
+	db.SetMaxIdleConns(200)
 
 	server := grpc.NewServer()
 
