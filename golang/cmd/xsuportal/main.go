@@ -1587,7 +1587,7 @@ func makeLeaderboardPB(teamID int64) (*resourcespb.Leaderboard, error) {
 	}
 	jobResults := make([]xsuportal.JobResult, 0, 2000)
 	for _, j := range jobResultsCache {
-		if (teamID == j.TeamID || contestFinished || j.FinishedAt.Before(contestFreezesAt)) && !j.FinishedAt.After(newestJobTime) {
+		if teamID == j.TeamID || contestFinished || j.FinishedAt.Before(contestFreezesAt) {
 			jobResults = append(jobResults, *j)
 		}
 	}
@@ -1628,6 +1628,13 @@ func makeLeaderboardPB(teamID int64) (*resourcespb.Leaderboard, error) {
 			pb.GeneralTeams = append(pb.GeneralTeams, item)
 		}
 		pb.Teams = append(pb.Teams, item)
+		var max int64
+		for _, v := range item.Scores {
+			if max < v.Score {
+				max = v.Score
+			}
+		}
+		fmt.Println(item.Team.Id, item.BestScore.Score, max)
 	}
 	return pb, nil
 }
