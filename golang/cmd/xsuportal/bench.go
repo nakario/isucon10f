@@ -253,10 +253,13 @@ func (b *benchmarkReportService) saveAsFinished(db sqlx.Ext, job *xsuportal.Benc
 	jobResult.StartedAt = job.StartedAt.Time
 	jobResult.FinishedAt = markedAt
 	jobResult.Score = int64(raw.Int32 - deduction.Int32)
-	jobResultsCache = append(jobResultsCache, jobResult)
-	sort.SliceStable(jobResultsCache, func(i, j int) bool {
-		return jobResultsCache[i].FinishedAt.Before(jobResultsCache[j].FinishedAt)
+	// Binary search and insert
+	i := sort.Search(len(jobResultsCache), func(i int) bool {
+		return jobResult.FinishedAt.Before(jobResultsCache[i].FinishedAt)
 	})
+	jobResultsCache = append(jobResultsCache, jobResult)
+	copy(jobResultsCache[i+1:], jobResultsCache[i:])
+	jobResultsCache[i] = jobResult
 	return nil
 }
 
