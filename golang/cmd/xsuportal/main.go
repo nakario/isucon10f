@@ -15,12 +15,12 @@ import (
 	"log"
 	"net/http"
 	_ "net/http/pprof"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/go-sql-driver/mysql"
 	"github.com/golang/protobuf/proto"
 	"github.com/gorilla/sessions"
 	"github.com/jmoiron/sqlx"
@@ -182,10 +182,17 @@ func (*AdminService) Initialize(e echo.Context) error {
 
 	passwordHash := sha256.Sum256([]byte(AdminPassword))
 	digest := hex.EncodeToString(passwordHash[:])
-	_, err := db.Exec("INSERT `contestants` (`id`, `password`, `staff`, `created_at`) VALUES (?, ?, TRUE, NOW(6))", AdminID, digest)
-	if err != nil {
-		return fmt.Errorf("insert initial contestant: %w", err)
+	contestant := xsuportal.Contestant{
+		ID:        AdminID,
+		Password:  digest,
+		Staff:     true,
+		CreatedAt: time.Now().Round(time.Microsecond),
 	}
+	xsuportal.ContestantServer.Set(AdminID, contestant)
+	// _, err := db.Exec("INSERT `contestants` (`id`, `password`, `staff`, `created_at`) VALUES (?, ?, TRUE, NOW(6))", AdminID, digest)
+	// if err != nil {
+	// 	return fmt.Errorf("insert initial contestant: %w", err)
+	// }
 
 	if req.Contest != nil {
 		freezesAt := req.Contest.ContestFreezesAt.AsTime().Round(time.Microsecond)
@@ -724,17 +731,28 @@ func (*ContestantService) Signup(e echo.Context) error {
 	}
 
 	hash := sha256.Sum256([]byte(req.Password))
-	_, err := db.Exec(
-		"INSERT INTO `contestants` (`id`, `password`, `staff`, `created_at`) VALUES (?, ?, FALSE, NOW(6))",
-		req.ContestantId,
-		hex.EncodeToString(hash[:]),
-	)
-	if mErr, ok := err.(*mysql.MySQLError); ok && mErr.Number == MYSQL_ER_DUP_ENTRY {
+	exists := xsuportal.ContestantServer.Exists(req.ContestantId)
+	if exists {
 		return halt(e, http.StatusBadRequest, "IDが既に登録されています", nil)
 	}
-	if err != nil {
-		return fmt.Errorf("insert contestant: %w", err)
+	contestant := xsuportal.Contestant{
+		ID:        req.ContestantId,
+		Password:  hex.EncodeToString(hash[:]),
+		Staff:     false,
+		CreatedAt: time.Now().Round(time.Microsecond),
 	}
+	xsuportal.ContestantServer.Set(req.ContestantId, contestant)
+	// _, err := db.Exec(
+	// 	"INSERT INTO `contestants` (`id`, `password`, `staff`, `created_at`) VALUES (?, ?, FALSE, NOW(6))",
+	// 	req.ContestantId,
+	// 	hex.EncodeToString(hash[:]),
+	// )
+	// if mErr, ok := err.(*mysql.MySQLError); ok && mErr.Number == MYSQL_ER_DUP_ENTRY {
+	// 	return halt(e, http.StatusBadRequest, "IDが既に登録されています", nil)
+	// }
+	// if err != nil {
+	// 	return fmt.Errorf("insert contestant: %w", err)
+	// }
 	sess, err := session.Get(SessionName, e)
 	if err != nil {
 		return fmt.Errorf("get session: %w", err)
@@ -755,18 +773,23 @@ func (*ContestantService) Login(e echo.Context) error {
 	if err := e.Bind(&req); err != nil {
 		return err
 	}
-	var password string
-	err := db.Get(
-		&password,
-		"SELECT `password` FROM `contestants` WHERE `id` = ? LIMIT 1",
-		req.ContestantId,
-	)
-	if err != sql.ErrNoRows && err != nil {
-		return fmt.Errorf("get contestant: %w", err)
+	var contestant xsuportal.Contestant
+	ok := xsuportal.ContestantServer.Get(req.ContestantId, &contestant)
+	// err := db.Get(
+	// 	&password,
+	// 	"SELECT `password` FROM `contestants` WHERE `id` = ? LIMIT 1",
+	// 	req.ContestantId,
+	// )
+	// if err != sql.ErrNoRows && err != nil {
+	// 	return fmt.Errorf("get contestant: %w", err)
+	// }
+	if !ok {
+		return halt(e, http.StatusBadRequest, "ログインIDまたはパスワードが正しくありません", nil)
 	}
+	password := contestant.Password
 	passwordHash := sha256.Sum256([]byte(req.Password))
 	digest := hex.EncodeToString(passwordHash[:])
-	if err != sql.ErrNoRows && subtle.ConstantTimeCompare([]byte(digest), []byte(password)) == 1 {
+	if subtle.ConstantTimeCompare([]byte(digest), []byte(password)) == 1 {
 		sess, err := session.Get(SessionName, e)
 		if err != nil {
 			return fmt.Errorf("get session: %w", err)
@@ -843,11 +866,19 @@ func (*RegistrationService) GetRegistrationSession(e echo.Context) error {
 
 	var members []xsuportal.Contestant
 	if team != nil {
-		err := db.Select(
-			&members,
-			"SELECT * FROM `contestants` WHERE `team_id` = ?",
-			team.ID,
-		)
+		memberIDs := make([]string, 0, 3)
+		xsuportal.ContestantServer.Get(strconv.FormatInt(team.ID, 10), &memberIDs)
+		result := xsuportal.ContestantServer.MGet(memberIDs)
+		for _, v := range memberIDs {
+			var m xsuportal.Contestant
+			result.Get(v, &m)
+			members = append(members, m)
+		}
+		// err := db.Select(
+		// 	&members,
+		// 	"SELECT * FROM `contestants` WHERE `team_id` = ?",
+		// 	team.ID,
+		// )
 		if err != nil {
 			return fmt.Errorf("select members: %w", err)
 		}
@@ -949,18 +980,27 @@ func (*RegistrationService) CreateTeam(e echo.Context) error {
 	}
 
 	contestant, _ := getCurrentContestant(e, db, false)
+	contestant.Name.Scan(req.Name)
+	contestant.Student = req.IsStudent
+	contestant.TeamID.Scan(teamID)
 
-	_, err = conn.ExecContext(
-		ctx,
-		"UPDATE `contestants` SET `name` = ?, `student` = ?, `team_id` = ? WHERE id = ? LIMIT 1",
-		req.Name,
-		req.IsStudent,
-		teamID,
-		contestant.ID,
-	)
-	if err != nil {
-		return fmt.Errorf("update contestant: %w", err)
-	}
+	// {jfoeajfoea23(contestant.ID): contestant, 21(teamID): [joefajre24, jieurae3]}
+	xsuportal.ContestantServer.Set(contestant.ID, contestant)
+	contestantIDs := make([]string, 0, 3)
+	xsuportal.ContestantServer.Get(strconv.FormatInt(teamID, 10), &contestantIDs)
+	contestantIDs = append(contestantIDs, contestant.ID)
+	xsuportal.ContestantServer.Set(strconv.FormatInt(teamID, 10), contestantIDs)
+	// _, err = conn.ExecContext(
+	// 	ctx,
+	// 	"UPDATE `contestants` SET `name` = ?, `student` = ?, `team_id` = ? WHERE id = ? LIMIT 1",
+	// 	req.Name,
+	// 	req.IsStudent,
+	// 	teamID,
+	// 	contestant.ID,
+	// )
+	// if err != nil {
+	// 	return fmt.Errorf("update contestant: %w", err)
+	// }
 
 	nonStudentCount := 0
 	if !req.IsStudent {
@@ -1023,30 +1063,38 @@ func (*RegistrationService) JoinTeam(e echo.Context) error {
 	if err != nil {
 		return fmt.Errorf("get team with lock: %w", err)
 	}
-	var memberCount int
-	err = tx.Get(
-		&memberCount,
-		"SELECT COUNT(*) AS `cnt` FROM `contestants` WHERE `team_id` = ?",
-		req.TeamId,
-	)
-	if err != nil {
-		return fmt.Errorf("count team member: %w", err)
-	}
+	member := make([]string, 0, 3)
+	xsuportal.ContestantServer.Get(strconv.FormatInt(req.TeamId, 10), &member)
+	memberCount := len(member)
+	// err = tx.Get(
+	// 	&memberCount,
+	// 	"SELECT COUNT(*) AS `cnt` FROM `contestants` WHERE `team_id` = ?",
+	// 	req.TeamId,
+	// )
+	// if err != nil {
+	// 	return fmt.Errorf("count team member: %w", err)
+	// }
 	if memberCount >= 3 {
 		return halt(e, http.StatusBadRequest, "チーム人数の上限に達しています", nil)
 	}
 
 	contestant, _ := getCurrentContestant(e, tx, false)
-	_, err = tx.Exec(
-		"UPDATE `contestants` SET `team_id` = ?, `name` = ?, `student` = ? WHERE `id` = ? LIMIT 1",
-		req.TeamId,
-		req.Name,
-		req.IsStudent,
-		contestant.ID,
-	)
-	if err != nil {
-		return fmt.Errorf("update contestant: %w", err)
-	}
+	contestant.TeamID.Scan(req.TeamId)
+	contestant.Name.Scan(req.Name)
+	contestant.Student = req.IsStudent
+	xsuportal.ContestantServer.Set(contestant.ID, contestant)
+	member = append(member, contestant.ID)
+	xsuportal.ContestantServer.Set(strconv.FormatInt(req.TeamId, 10), member)
+	// _, err = tx.Exec(
+	// 	"UPDATE `contestants` SET `team_id` = ?, `name` = ?, `student` = ? WHERE `id` = ? LIMIT 1",
+	// 	req.TeamId,
+	// 	req.Name,
+	// 	req.IsStudent,
+	// 	contestant.ID,
+	// )
+	// if err != nil {
+	// 	return fmt.Errorf("update contestant: %w", err)
+	// }
 
 	if !req.IsStudent {
 		_, err = tx.Exec(
@@ -1103,15 +1151,19 @@ func (*RegistrationService) UpdateRegistration(e echo.Context) error {
 			return fmt.Errorf("update non_student_count: %w", err)
 		}
 	}
-	_, err = tx.Exec(
-		"UPDATE `contestants` SET `name` = ?, `student` = ? WHERE `id` = ? LIMIT 1",
-		req.Name,
-		req.IsStudent,
-		contestant.ID,
-	)
-	if err != nil {
-		return fmt.Errorf("update contestant: %w", err)
-	}
+	contestant.Name.Scan(req.Name)
+	contestant.Student = req.IsStudent
+
+	xsuportal.ContestantServer.Set(contestant.ID, contestant)
+	// _, err = tx.Exec(
+	// 	"UPDATE `contestants` SET `name` = ?, `student` = ? WHERE `id` = ? LIMIT 1",
+	// 	req.Name,
+	// 	req.IsStudent,
+	// 	contestant.ID,
+	// )
+	// if err != nil {
+	// 	return fmt.Errorf("update contestant: %w", err)
+	// }
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit tx: %w", err)
 	}
@@ -1184,14 +1236,23 @@ func (*AudienceService) ListTeams(e echo.Context) error {
 	res := &audiencepb.ListTeamsResponse{}
 	for _, team := range teams {
 		var members []xsuportal.Contestant
-		err := db.Select(
-			&members,
-			"SELECT * FROM `contestants` WHERE `team_id` = ? ORDER BY `created_at`",
-			team.ID,
-		)
-		if err != nil {
-			return fmt.Errorf("select members(team_id=%v): %w", team.ID, err)
+		memberIDs := make([]string, 0, 3)
+		xsuportal.ContestantServer.Get(strconv.FormatInt(team.ID, 10), &memberIDs)
+		result := xsuportal.ContestantServer.MGet(memberIDs)
+		for _, v := range memberIDs {
+			var m xsuportal.Contestant
+			result.Get(v, &m)
+			members = append(members, m)
 		}
+		sort.SliceStable(members, func(i, j int) bool { return members[i].CreatedAt.Before(members[j].CreatedAt) })
+		// err := db.Select(
+		// 	&members,
+		// 	"SELECT * FROM `contestants` WHERE `team_id` = ? ORDER BY `created_at`",
+		// 	team.ID,
+		// )
+		// if err != nil {
+		// 	return fmt.Errorf("select members(team_id=%v): %w", team.ID, err)
+		// }
 		var memberNames []string
 		isStudent := true
 		for _, member := range members {
@@ -1244,17 +1305,21 @@ func getCurrentContestant(e echo.Context, db sqlx.Queryer, lock bool) (*xsuporta
 		return nil, nil
 	}
 	var contestant xsuportal.Contestant
-	query := "SELECT * FROM `contestants` WHERE `id` = ? LIMIT 1"
-	if lock {
-		query += " FOR UPDATE"
-	}
-	err = sqlx.Get(db, &contestant, query, contestantID)
-	if err == sql.ErrNoRows {
+	ok = xsuportal.ContestantServer.Get(contestantID.(string), &contestant)
+	if !ok {
 		return nil, nil
 	}
-	if err != nil {
-		return nil, fmt.Errorf("query contestant: %w", err)
-	}
+	// query := "SELECT * FROM `contestants` WHERE `id` = ? LIMIT 1"
+	// if lock {
+	// 	query += " FOR UPDATE"
+	// }
+	// err = sqlx.Get(db, &contestant, query, contestantID)
+	// if err == sql.ErrNoRows {
+	// 	return nil, nil
+	// }
+	// if err != nil {
+	// 	return nil, fmt.Errorf("query contestant: %w", err)
+	// }
 	xc.Contestant = &contestant
 	return xc.Contestant, nil
 }
@@ -1435,15 +1500,26 @@ func makeTeamPB(db sqlx.Queryer, t *xsuportal.Team, detail bool, enableMembers b
 	if enableMembers {
 		if t.LeaderID.Valid {
 			var leader xsuportal.Contestant
-			if err := sqlx.Get(db, &leader, "SELECT * FROM `contestants` WHERE `id` = ? LIMIT 1", t.LeaderID.String); err != nil {
-				return nil, fmt.Errorf("get leader: %w", err)
-			}
+			xsuportal.ContestantServer.Get(t.LeaderID.String, &leader)
+			// if err := sqlx.Get(db, &leader, "SELECT * FROM `contestants` WHERE `id` = ? LIMIT 1", t.LeaderID.String); err != nil {
+			// 	return nil, fmt.Errorf("get leader: %w", err)
+			// }
 			pb.Leader = makeContestantPB(&leader)
 		}
 		var members []xsuportal.Contestant
-		if err := sqlx.Select(db, &members, "SELECT * FROM `contestants` WHERE `team_id` = ? ORDER BY `created_at`", t.ID); err != nil {
-			return nil, fmt.Errorf("select members: %w", err)
+		memberIDs := make([]string, 0, 3)
+		xsuportal.ContestantServer.Get(strconv.FormatInt(t.ID, 10), &memberIDs)
+		result := xsuportal.ContestantServer.MGet(memberIDs)
+		for _, v := range memberIDs {
+			var m xsuportal.Contestant
+			result.Get(v, &m)
+			members = append(members, m)
 		}
+		sort.SliceStable(members, func(i, j int) bool { return members[i].CreatedAt.Before(members[j].CreatedAt) })
+
+		// if err := sqlx.Select(db, &members, "SELECT * FROM `contestants` WHERE `team_id` = ? ORDER BY `created_at`", t.ID); err != nil {
+		// 	return nil, fmt.Errorf("select members: %w", err)
+		// }
 		for _, member := range members {
 			pb.Members = append(pb.Members, makeContestantPB(&member))
 			pb.MemberIds = append(pb.MemberIds, member.ID)
@@ -1590,27 +1666,12 @@ func makeLeaderboardPB(teamID int64) (*resourcespb.Leaderboard, error) {
 	if err != sql.ErrNoRows && err != nil {
 		return nil, fmt.Errorf("select leaderboard: %w", err)
 	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit tx: %w", err)
+	}
 	newestJobTime := make(map[int64]time.Time)
 	for _, te := range leaderboard {
 		newestJobTime[te.Team().ID] = te.LatestScoreMarkedAt.Time
-	}
-	jobResultsQuery := "SELECT\n" +
-		"count(*)\n" +
-		"FROM\n" +
-		"  `benchmark_jobs`\n" +
-		"WHERE\n" +
-		"  `started_at` IS NOT NULL\n" +
-		"  AND (\n" +
-		"    `finished_at` IS NOT NULL\n" +
-		"    -- score freeze\n" +
-		"    AND (`team_id` = ? OR (`team_id` != ? AND (? = TRUE OR `finished_at` < ?)))\n" +
-		"  )\n" +
-		"ORDER BY\n" +
-		"  `finished_at`"
-	var jobResults2 int64
-	err = tx.Get(&jobResults2, jobResultsQuery, teamID, teamID, contestFinished, contestFreezesAt)
-	if err != sql.ErrNoRows && err != nil {
-		return nil, fmt.Errorf("select job results: %w", err)
 	}
 	jobResults := make([]xsuportal.JobResult, 0, 2000)
 	for _, j := range jobResultsCache {
@@ -1621,9 +1682,6 @@ func makeLeaderboardPB(teamID int64) (*resourcespb.Leaderboard, error) {
 		}
 	}
 
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("commit tx: %w", err)
-	}
 	teamGraphScores := make(map[int64][]*resourcespb.Leaderboard_LeaderboardItem_LeaderboardScore)
 	for _, jobResult := range jobResults {
 		teamGraphScores[jobResult.TeamID] = append(teamGraphScores[jobResult.TeamID], &resourcespb.Leaderboard_LeaderboardItem_LeaderboardScore{
