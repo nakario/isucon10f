@@ -43,7 +43,7 @@ import (
 )
 
 const (
-	TeamCapacity               = 120
+	TeamCapacity               = 200
 	AdminID                    = "admin"
 	AdminPassword              = "admin"
 	DebugContestStatusFilePath = "/tmp/XSUPORTAL_CONTEST_STATUS"
@@ -1633,7 +1633,7 @@ func makeContestantLeaderboardPBProto(teamID int64) ([]byte, error) {
 	}
 
 	key := "0"
-	if contest.CurrentTime.After(contest.ContestFreezesAt) || contest.ContestEndsAt.After(contest.CurrentTime) {
+	if contest.CurrentTime.After(contest.ContestFreezesAt) && contest.ContestEndsAt.After(contest.CurrentTime) {
 		key = strconv.Itoa(int(teamID))
 	}
 
@@ -1652,6 +1652,8 @@ func makeContestantLeaderboardPBProto(teamID int64) ([]byte, error) {
 	}
 	if shared {
 		log.Println("[DEBUG] ContestantLeaderboard shared cache!")
+	} else {
+		log.Println("[DEBUG] CACHE_NOT_USED")
 	}
 	return v.([]byte), nil
 }
