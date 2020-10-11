@@ -155,18 +155,22 @@ type AdminService struct{}
 func (*AdminService) Cache(e echo.Context) error {
 	// atatame mysql thread cache
 	wg := &sync.WaitGroup{}
+	ch := make(chan interface{})
 	for i := 0; i < 1000; i++ {
+		time.Sleep(1 * time.Millisecond)
 		wg.Add(1)
 		go func() {
 			tx, err := db.Begin()
 			if err != nil {
 				fmt.Println("thrad cache error: ", err)
 			}
-			time.Sleep(3 * time.Second)
+			<-ch
 			tx.Commit()
 			wg.Done()
 		}()
 	}
+	time.Sleep(3 * time.Second)
+	close(ch)
 	fmt.Println("wait: ", time.Now())
 	wg.Wait()
 	fmt.Println("finish: ", time.Now())
