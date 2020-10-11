@@ -159,6 +159,7 @@ func (*AdminService) Initialize(e echo.Context) error {
 
 	close(jobQueue)
 	jobQueue = make(chan xsuportal.BenchmarkJob, 1000)
+	contestantLeaderboardGroup = &singleflight.Group{}
 
 	queries := []string{
 		"TRUNCATE `teams`",
@@ -628,51 +629,18 @@ func (*ContestantService) RequestClarification(e echo.Context) error {
 	})
 }
 
-var finishedJobCount int = 0
-var leaderboardCache *resourcespb.Leaderboard
-
 func (*ContestantService) Dashboard(e echo.Context) error {
 	if ok, err := loginRequired(e, db, &loginRequiredOption{Team: true}); !ok {
 		return wrapError("check session", err)
 	}
-	team, _ := getCurrentTeam(e, db, false)
+	contestant, _ := getCurrentContestant(e, db, false)
 
-	contestStatus, err := getCurrentContestStatus(db)
+	res, err := makeContestantLeaderboardPBProto(contestant.TeamID.Int64)
 	if err != nil {
-		return fmt.Errorf("get current contest status: %w", err)
-	}
-	contestFinished := contestStatus.Status == resourcespb.Contest_FINISHED
-	contestFreezesAt := contestStatus.ContestFreezesAt
-	if contestFinished || time.Now().Before(contestFreezesAt) {
-		fmt.Println("koko")
-		var tmpFinishedJobCount int
-		db.Get(&tmpFinishedJobCount, "SELECT count(*) from benchmark_jobs where finished_at IS NOT NULL")
-		if tmpFinishedJobCount == finishedJobCount && leaderboardCache != nil {
-			fmt.Println("success cache!")
-			return writeProto(e, http.StatusOK, &contestantpb.DashboardResponse{
-				Leaderboard: leaderboardCache,
-			})
-		} else {
-			leaderboard, err := makeLeaderboardPB(team.ID)
-			if err != nil {
-				return fmt.Errorf("make leaderboard: %w", err)
-			}
-			leaderboardCache = leaderboard
-			finishedJobCount = tmpFinishedJobCount
-			return writeProto(e, http.StatusOK, &contestantpb.DashboardResponse{
-				Leaderboard: leaderboard,
-			})
-		}
-	} else {
-		leaderboard, err := makeLeaderboardPB(team.ID)
-		if err != nil {
-			return fmt.Errorf("make leaderboard: %w", err)
-		}
-		return writeProto(e, http.StatusOK, &contestantpb.DashboardResponse{
-			Leaderboard: leaderboard,
-		})
+		return fmt.Errorf("makeContestantLeaderboardPBProto: %w", err)
 	}
 
+	return writeRes(e, http.StatusOK, res)
 }
 
 func (*ContestantService) ListNotifications(e echo.Context) error {
@@ -1545,7 +1513,39 @@ func makePublicLeaderboardPBProto() ([]byte, error) {
 		return nil, err
 	}
 	if shared {
-		log.Println("PublicLeaderboard shared cache!")
+		log.Println("[DEBUG] PublicLeaderboard shared cache!")
+	}
+	return v.([]byte), nil
+}
+
+var contestantLeaderboardGroup = &singleflight.Group{}
+
+func makeContestantLeaderboardPBProto(teamID int64) ([]byte, error) {
+	contest, err := getCurrentContestStatus(db)
+	if err != nil {
+		return nil, err
+	}
+
+	key := "0"
+	if contest.CurrentTime.After(contest.ContestFreezesAt) || contest.ContestEndsAt.After(contest.CurrentTime) {
+		key = strconv.Itoa(int(teamID))
+	}
+
+	v, err, shared := contestantLeaderboardGroup.Do(key, func() (interface{}, error) {
+		lb, err := makeLeaderboardPB(teamID)
+		if err != nil {
+			return nil, err
+		}
+		res, _ := proto.Marshal(&contestantpb.DashboardResponse{
+			Leaderboard: lb,
+		})
+		return res, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if shared {
+		log.Println("[DEBUG] ContestantLeaderboard shared cache!")
 	}
 	return v.([]byte), nil
 }
@@ -1590,11 +1590,12 @@ func makeLeaderboardPB(teamID int64) (*resourcespb.Leaderboard, error) {
 	if err != sql.ErrNoRows && err != nil {
 		return nil, fmt.Errorf("select leaderboard: %w", err)
 	}
+	newestJobTime := make(map[int64]time.Time)
+	for _, te := range leaderboard {
+		newestJobTime[te.Team().ID] = te.LatestScoreMarkedAt.Time
+	}
 	jobResultsQuery := "SELECT\n" +
-		"  `team_id` AS `team_id`,\n" +
-		"  (`score_raw` - `score_deduction`) AS `score`,\n" +
-		"  `started_at` AS `started_at`,\n" +
-		"  `finished_at` AS `finished_at`\n" +
+		"count(*)\n" +
 		"FROM\n" +
 		"  `benchmark_jobs`\n" +
 		"WHERE\n" +
@@ -1606,11 +1607,20 @@ func makeLeaderboardPB(teamID int64) (*resourcespb.Leaderboard, error) {
 		"  )\n" +
 		"ORDER BY\n" +
 		"  `finished_at`"
-	var jobResults []xsuportal.JobResult
-	err = tx.Select(&jobResults, jobResultsQuery, teamID, teamID, contestFinished, contestFreezesAt)
+	var jobResults2 int64
+	err = tx.Get(&jobResults2, jobResultsQuery, teamID, teamID, contestFinished, contestFreezesAt)
 	if err != sql.ErrNoRows && err != nil {
 		return nil, fmt.Errorf("select job results: %w", err)
 	}
+	jobResults := make([]xsuportal.JobResult, 0, 2000)
+	for _, j := range jobResultsCache {
+		if teamID == j.TeamID || contestFinished || j.FinishedAt.Before(contestFreezesAt) {
+			if !j.FinishedAt.After(newestJobTime[j.TeamID]) {
+				jobResults = append(jobResults, *j)
+			}
+		}
+	}
+
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit tx: %w", err)
 	}
