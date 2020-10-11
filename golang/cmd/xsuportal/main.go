@@ -1666,27 +1666,12 @@ func makeLeaderboardPB(teamID int64) (*resourcespb.Leaderboard, error) {
 	if err != sql.ErrNoRows && err != nil {
 		return nil, fmt.Errorf("select leaderboard: %w", err)
 	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit tx: %w", err)
+	}
 	newestJobTime := make(map[int64]time.Time)
 	for _, te := range leaderboard {
 		newestJobTime[te.Team().ID] = te.LatestScoreMarkedAt.Time
-	}
-	jobResultsQuery := "SELECT\n" +
-		"count(*)\n" +
-		"FROM\n" +
-		"  `benchmark_jobs`\n" +
-		"WHERE\n" +
-		"  `started_at` IS NOT NULL\n" +
-		"  AND (\n" +
-		"    `finished_at` IS NOT NULL\n" +
-		"    -- score freeze\n" +
-		"    AND (`team_id` = ? OR (`team_id` != ? AND (? = TRUE OR `finished_at` < ?)))\n" +
-		"  )\n" +
-		"ORDER BY\n" +
-		"  `finished_at`"
-	var jobResults2 int64
-	err = tx.Get(&jobResults2, jobResultsQuery, teamID, teamID, contestFinished, contestFreezesAt)
-	if err != sql.ErrNoRows && err != nil {
-		return nil, fmt.Errorf("select job results: %w", err)
 	}
 	jobResults := make([]xsuportal.JobResult, 0, 2000)
 	for _, j := range jobResultsCache {
@@ -1697,9 +1682,6 @@ func makeLeaderboardPB(teamID int64) (*resourcespb.Leaderboard, error) {
 		}
 	}
 
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("commit tx: %w", err)
-	}
 	teamGraphScores := make(map[int64][]*resourcespb.Leaderboard_LeaderboardItem_LeaderboardScore)
 	for _, jobResult := range jobResults {
 		teamGraphScores[jobResult.TeamID] = append(teamGraphScores[jobResult.TeamID], &resourcespb.Leaderboard_LeaderboardItem_LeaderboardScore{
