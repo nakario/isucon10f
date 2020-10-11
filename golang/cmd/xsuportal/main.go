@@ -1568,13 +1568,6 @@ func makeLeaderboardPB(teamID int64) (*resourcespb.Leaderboard, error) {
 		}
 	}
 
-	var jobResults []xsuportal.JobResult
-	for _, j := range jobResultsCache {
-		if (teamID == j.TeamID || contestFinished || j.FinishedAt.Before(contestFreezesAt)) && !j.FinishedAt.After(newestJobTime) {
-			jobResults = append(jobResults, *j)
-		}
-	}
-
 	jobResultsQuery := "SELECT\n" +
 		"  `team_id` AS `team_id`,\n" +
 		"  (`score_raw` - `score_deduction`) AS `score`,\n" +
@@ -1596,6 +1589,13 @@ func makeLeaderboardPB(teamID int64) (*resourcespb.Leaderboard, error) {
 	if err != sql.ErrNoRows && err != nil {
 		return nil, fmt.Errorf("select leaderboard: %w", err)
 	}
+	var jobResults []xsuportal.JobResult
+	for _, j := range jobResultsCache {
+		if (teamID == j.TeamID || contestFinished || j.FinishedAt.Before(contestFreezesAt)) && !j.FinishedAt.After(newestJobTime) {
+			jobResults = append(jobResults, *j)
+		}
+	}
+	jobResults = jobResults[:len(jobResults2)]
 
 	if len(jobResults) != len(jobResults2) {
 		fmt.Println("diff len: ", len(jobResults), len(jobResults2))
