@@ -128,6 +128,11 @@ func (b *benchmarkReportService) ReportBenchmarkResult(srv bench.BenchmarkReport
 				return nil
 			}
 
+			ccs, err := getCurrentContestStatus(db)
+			if err != nil {
+				return fmt.Errorf("get contest status: %w", err)
+			}
+
 			tx, err := db.Beginx()
 			if err != nil {
 				return fmt.Errorf("begin tx: %w", err)
@@ -157,12 +162,18 @@ func (b *benchmarkReportService) ReportBenchmarkResult(srv bench.BenchmarkReport
 			BenchResultMap.Delete(key)
 
 			log.Printf("[DEBUG] %v: save as finished", req.JobId)
-			if err := b.saveAsFinished(tx, &job, req); err != nil {
+			if err := b.saveAsFinished(tx, &job, ccs, req); err != nil {
 				return err
 			}
 			if err := tx.Commit(); err != nil {
 				return fmt.Errorf("commit tx: %w", err)
 			}
+
+			key2 := "0"
+			if ccs.CurrentTime.After(ccs.ContestFreezesAt) || ccs.ContestEndsAt.After(ccs.CurrentTime) {
+				key2 = strconv.Itoa(int(job.TeamID))
+			}
+			contestantLeaderboardGroup.Forget(key2)
 			if err := notifier.NotifyBenchmarkJobFinished(db, &job); err != nil {
 				return fmt.Errorf("notify benchmark job finished: %w", err)
 			}
@@ -180,7 +191,7 @@ func (b *benchmarkReportService) ReportBenchmarkResult(srv bench.BenchmarkReport
 	}
 }
 
-func (b *benchmarkReportService) saveAsFinished(db sqlx.Ext, job *xsuportal.BenchmarkJob, req *bench.ReportBenchmarkResultRequest) error {
+func (b *benchmarkReportService) saveAsFinished(db sqlx.Ext, job *xsuportal.BenchmarkJob, cs *xsuportal.ContestStatus, req *bench.ReportBenchmarkResultRequest) error {
 	if !job.StartedAt.Valid || job.FinishedAt.Valid {
 		return status.Errorf(codes.FailedPrecondition, "Job %v has already finished or has not started yet", req.JobId)
 	}
@@ -214,11 +225,6 @@ func (b *benchmarkReportService) saveAsFinished(db sqlx.Ext, job *xsuportal.Benc
 		return fmt.Errorf("update benchmark job status: %w", err)
 	}
 
-	status, err := getCurrentContestStatus(db)
-	if err != nil {
-		return fmt.Errorf("get contest status: %w", err)
-	}
-
 	// private freezing update
 	//    TRUE     TRUE   TRUE
 	//    TRUE    FALSE   TRUE
@@ -240,7 +246,7 @@ func (b *benchmarkReportService) saveAsFinished(db sqlx.Ext, job *xsuportal.Benc
 		score,
 		job.ID,
 		job.TeamID,
-		status.ContestFreezesAt.Before(markedAt), // freezing
+		cs.ContestFreezesAt.Before(markedAt), // freezing
 	)
 	if err != nil {
 		return fmt.Errorf("update leaderboard: %w", err)
