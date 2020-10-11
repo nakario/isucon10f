@@ -1591,7 +1591,6 @@ func makeLeaderboardPB(teamID int64) (*resourcespb.Leaderboard, error) {
 			}
 		}
 	}
-	//jobResults = jobResults[:jobResults2]
 
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit tx: %w", err)
@@ -1628,13 +1627,6 @@ func makeLeaderboardPB(teamID int64) (*resourcespb.Leaderboard, error) {
 			pb.GeneralTeams = append(pb.GeneralTeams, item)
 		}
 		pb.Teams = append(pb.Teams, item)
-		var max int64
-		for _, v := range item.Scores {
-			if max < v.Score {
-				max = v.Score
-			}
-		}
-		fmt.Println(item.Team.Id, item.BestScore.Score, max)
 	}
 	return pb, nil
 }
