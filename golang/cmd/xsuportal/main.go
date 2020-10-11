@@ -21,7 +21,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-sql-driver/mysql"
 	"github.com/golang/protobuf/proto"
 	"github.com/gorilla/sessions"
 	"github.com/jmoiron/sqlx"
@@ -725,17 +724,28 @@ func (*ContestantService) Signup(e echo.Context) error {
 	}
 
 	hash := sha256.Sum256([]byte(req.Password))
-	_, err := db.Exec(
-		"INSERT INTO `contestants` (`id`, `password`, `staff`, `created_at`) VALUES (?, ?, FALSE, NOW(6))",
-		req.ContestantId,
-		hex.EncodeToString(hash[:]),
-	)
-	if mErr, ok := err.(*mysql.MySQLError); ok && mErr.Number == MYSQL_ER_DUP_ENTRY {
+	exists := xsuportal.ContestantServer.Exists(req.ContestantId)
+	if exists {
 		return halt(e, http.StatusBadRequest, "IDが既に登録されています", nil)
 	}
-	if err != nil {
-		return fmt.Errorf("insert contestant: %w", err)
+	contestant := xsuportal.Contestant{
+		ID:        req.ContestantId,
+		Password:  hex.EncodeToString(hash[:]),
+		Staff:     false,
+		CreatedAt: time.Now().Round(time.Microsecond),
 	}
+	xsuportal.ContestantServer.Set(req.ContestantId, contestant)
+	// _, err := db.Exec(
+	// 	"INSERT INTO `contestants` (`id`, `password`, `staff`, `created_at`) VALUES (?, ?, FALSE, NOW(6))",
+	// 	req.ContestantId,
+	// 	hex.EncodeToString(hash[:]),
+	// )
+	// if mErr, ok := err.(*mysql.MySQLError); ok && mErr.Number == MYSQL_ER_DUP_ENTRY {
+	// 	return halt(e, http.StatusBadRequest, "IDが既に登録されています", nil)
+	// }
+	// if err != nil {
+	// 	return fmt.Errorf("insert contestant: %w", err)
+	// }
 	sess, err := session.Get(SessionName, e)
 	if err != nil {
 		return fmt.Errorf("get session: %w", err)
