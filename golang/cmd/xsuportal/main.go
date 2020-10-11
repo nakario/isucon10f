@@ -1302,7 +1302,10 @@ func getCurrentContestant(e echo.Context, db sqlx.Queryer, lock bool) (*xsuporta
 		return nil, nil
 	}
 	var contestant xsuportal.Contestant
-	xsuportal.ContestantServer.Get(contestantID.(string), &contestant)
+	ok = xsuportal.ContestantServer.Get(contestantID.(string), &contestant)
+	if !ok {
+		return nil, nil
+	}
 	// query := "SELECT * FROM `contestants` WHERE `id` = ? LIMIT 1"
 	// if lock {
 	// 	query += " FOR UPDATE"
