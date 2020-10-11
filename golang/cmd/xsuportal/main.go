@@ -58,6 +58,7 @@ var contestantIdMap sync.Map
 func main() {
 	go func() { log.Println(http.ListenAndServe(":9090", nil)) }()
 	go resetPublicLeaderboardCacheEvery(500 * time.Millisecond)
+	go broadcastForgetEvery(500 * time.Millisecond)
 	go benchMain()
 	srv := echo.New()
 	srv.Debug = false
@@ -1612,6 +1613,18 @@ func makePublicLeaderboardPBProto() ([]byte, error) {
 }
 
 var contestantLeaderboardGroup = &singleflight.Group{}
+var forgetCond *sync.Cond = sync.NewCond(new(sync.Mutex))
+
+func broadcastForgetEvery(d time.Duration) {
+	ticker := time.NewTicker(d)
+	for {
+		select {
+		case <-ticker.C:
+			contestantLeaderboardGroup.Forget("0")
+			forgetCond.Broadcast()
+		}
+	}
+}
 
 func makeContestantLeaderboardPBProto(teamID int64) ([]byte, error) {
 	contest, err := getCurrentContestStatus(db)
