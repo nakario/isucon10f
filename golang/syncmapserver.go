@@ -20,7 +20,7 @@ import (
 // 同時にリクエストされるGoroutine の数がこれに比べて多いと性能が落ちる。
 // かといってものすごい多いと peer する. 16 ~ 100 くらいが安定か？アクセス過多な場合は仕方ない。
 const maxSyncMapServerConnectionNum = 50
-const defaultReadBufferSize = 8192                // ガッと取ったほうが良い。メモリを使用したくなければ 1024.逆なら65536
+const defaultReadBufferSize = 1024                // ガッと取ったほうが良い。メモリを使用したくなければ 1024.逆なら65536
 const RedisHostPrivateIPAddress = "10.162.10.101" // ここで指定したサーバーに(Redis /SyncMapServerを) 建てる
 // `NewSyncMapServerConn(GetMasterServerAddress()+":8884", MyServerIsOnMasterServerIP()) `
 const SyncMapBackUpPath = "./syncmapbackup-" // カレントディレクトリにバックアップを作成。パーミッションに注意。
