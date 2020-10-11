@@ -1563,7 +1563,7 @@ func makeLeaderboardPB(teamID int64) (*resourcespb.Leaderboard, error) {
 	}
 	var newestJobTime time.Time
 	for _, te := range leaderboard {
-		if newestJobTime.After(te.LatestScoreMarkedAt.Time) {
+		if newestJobTime.Before(te.LatestScoreMarkedAt.Time) {
 			newestJobTime = te.LatestScoreMarkedAt.Time
 		}
 	}
@@ -1591,11 +1591,10 @@ func makeLeaderboardPB(teamID int64) (*resourcespb.Leaderboard, error) {
 	}
 	jobResults := make([]xsuportal.JobResult, 0, 2000)
 	for _, j := range jobResultsCache {
-		if teamID == j.TeamID || contestFinished || j.FinishedAt.Before(contestFreezesAt) {
+		if (teamID == j.TeamID || contestFinished || j.FinishedAt.Before(contestFreezesAt)) && !j.FinishedAt.After(newestJobTime) {
 			jobResults = append(jobResults, *j)
 		}
 	}
-	jobResults = jobResults[:len(jobResults2)]
 
 	if len(jobResults) != len(jobResults2) {
 		fmt.Println("diff len: ", len(jobResults), len(jobResults2))
