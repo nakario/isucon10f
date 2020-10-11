@@ -172,13 +172,15 @@ func (b *benchmarkReportService) ReportBenchmarkResult(srv bench.BenchmarkReport
 				return fmt.Errorf("commit tx: %w", err)
 			}
 
-			key2 := "0"
-			if ccs.CurrentTime.After(ccs.ContestFreezesAt) || ccs.ContestEndsAt.After(ccs.CurrentTime) {
-				key2 = strconv.Itoa(int(job.TeamID))
-			}
-			contestantLeaderboardGroup.Forget(key2)
 			if err := notifier.NotifyBenchmarkJobFinished(db, &job); err != nil {
 				return fmt.Errorf("notify benchmark job finished: %w", err)
+			}
+			if ccs.CurrentTime.After(ccs.ContestFreezesAt) && ccs.ContestEndsAt.After(ccs.CurrentTime) {
+				contestantLeaderboardGroup.Forget(strconv.Itoa(int(job.TeamID)))
+			} else {
+				forgetCond.L.Lock()
+				forgetCond.Wait()
+				forgetCond.L.Unlock()
 			}
 			return nil
 		}()

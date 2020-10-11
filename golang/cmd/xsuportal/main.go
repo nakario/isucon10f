@@ -44,7 +44,7 @@ import (
 )
 
 const (
-	TeamCapacity               = 120
+	TeamCapacity               = 200
 	AdminID                    = "admin"
 	AdminPassword              = "admin"
 	DebugContestStatusFilePath = "/tmp/XSUPORTAL_CONTEST_STATUS"
@@ -59,6 +59,7 @@ var contestantIdMap sync.Map
 func main() {
 	go func() { log.Println(http.ListenAndServe(":9090", nil)) }()
 	go resetPublicLeaderboardCacheEvery(500 * time.Millisecond)
+	go broadcastForgetEvery(500 * time.Millisecond)
 	go benchMain()
 	srv := echo.New()
 	srv.Debug = false
@@ -179,6 +180,8 @@ func (*AdminService) Initialize(e echo.Context) error {
 		}
 	}
 
+	xsuportal.ContestantServer.FlushAll()
+
 	xsuportal.PushSubscriptionGroup = &singleflight.Group{}
 
 	passwordHash := sha256.Sum256([]byte(AdminPassword))
@@ -243,12 +246,8 @@ type ClarificationWithTeam struct {
 }
 
 func (*AdminService) ListClarifications(e echo.Context) error {
-	if ok, err := loginRequired(e, db, &loginRequiredOption{}); !ok {
+	if ok, err := loginRequired(e, db, &loginRequiredOption{Staff: true}); !ok {
 		return wrapError("check session", err)
-	}
-	contestant, _ := getCurrentContestant(e, db, false)
-	if !contestant.Staff {
-		return halt(e, http.StatusForbidden, "管理者権限が必要です", nil)
 	}
 	keys := xsuportal.ClarificationServer.AllKeys()
 	clarifications := make([]ClarificationWithTeam, len(keys))
@@ -273,14 +272,10 @@ func (*AdminService) ListClarifications(e echo.Context) error {
 }
 
 func (*AdminService) GetClarification(e echo.Context) error {
-	if ok, err := loginRequired(e, db, &loginRequiredOption{}); !ok {
+	if ok, err := loginRequired(e, db, &loginRequiredOption{Staff: true}); !ok {
 		return wrapError("check session", err)
 	}
 	id := e.Param("id")
-	contestant, _ := getCurrentContestant(e, db, false)
-	if !contestant.Staff {
-		return halt(e, http.StatusForbidden, "管理者権限が必要です", nil)
-	}
 	var clarification ClarificationWithTeam
 	xsuportal.ClarificationServer.Get(id, &clarification)
 	c, err := makeClarificationPB(db, &clarification.C, &clarification.T)
@@ -293,14 +288,10 @@ func (*AdminService) GetClarification(e echo.Context) error {
 }
 
 func (*AdminService) RespondClarification(e echo.Context) error {
-	if ok, err := loginRequired(e, db, &loginRequiredOption{}); !ok {
+	if ok, err := loginRequired(e, db, &loginRequiredOption{Staff: true}); !ok {
 		return wrapError("check session", err)
 	}
 	id := e.Param("id")
-	contestant, _ := getCurrentContestant(e, db, false)
-	if !contestant.Staff {
-		return halt(e, http.StatusForbidden, "管理者権限が必要です", nil)
-	}
 	var req adminpb.RespondClarificationRequest
 	if err := e.Bind(&req); err != nil {
 		return err
@@ -1305,8 +1296,9 @@ func getCurrentContestStatus(db sqlx.Queryer) (*xsuportal.ContestStatus, error) 
 }
 
 type loginRequiredOption struct {
-	Team bool
-	Lock bool
+	Team  bool
+	Lock  bool
+	Staff bool
 }
 
 func loginRequired(e echo.Context, db sqlx.Queryer, option *loginRequiredOption) (bool, error) {
@@ -1315,7 +1307,12 @@ func loginRequired(e echo.Context, db sqlx.Queryer, option *loginRequiredOption)
 		return false, halt(e, http.StatusUnauthorized, "ログインが必要です", nil)
 	}
 	if !option.Lock {
-		if _, ok := contestantIdMap.Load(cookie.Value); ok {
+		if val, ok := contestantIdMap.Load(cookie.Value); ok {
+			if option.Staff {
+				if val.(string) != AdminID {
+					return false, halt(e, http.StatusForbidden, "管理者権限が必要です", nil)
+				}
+			}
 			return true, nil
 		}
 	}
@@ -1325,6 +1322,11 @@ func loginRequired(e echo.Context, db sqlx.Queryer, option *loginRequiredOption)
 	}
 	if contestant == nil {
 		return false, halt(e, http.StatusUnauthorized, "ログインが必要です", nil)
+	}
+	if option.Staff {
+		if !contestant.Staff {
+			return false, halt(e, http.StatusForbidden, "管理者権限が必要です", nil)
+		}
 	}
 
 	if option.Team {
@@ -1525,6 +1527,18 @@ func makePublicLeaderboardPBProto() ([]byte, error) {
 }
 
 var contestantLeaderboardGroup = &singleflight.Group{}
+var forgetCond *sync.Cond = sync.NewCond(new(sync.Mutex))
+
+func broadcastForgetEvery(d time.Duration) {
+	ticker := time.NewTicker(d)
+	for {
+		select {
+		case <-ticker.C:
+			contestantLeaderboardGroup.Forget("0")
+			forgetCond.Broadcast()
+		}
+	}
+}
 
 func makeContestantLeaderboardPBProto(teamID int64) ([]byte, error) {
 	contest, err := getCurrentContestStatus(db)
@@ -1533,7 +1547,7 @@ func makeContestantLeaderboardPBProto(teamID int64) ([]byte, error) {
 	}
 
 	key := "0"
-	if contest.CurrentTime.After(contest.ContestFreezesAt) || contest.ContestEndsAt.After(contest.CurrentTime) {
+	if contest.CurrentTime.After(contest.ContestFreezesAt) && contest.ContestEndsAt.After(contest.CurrentTime) {
 		key = strconv.Itoa(int(teamID))
 	}
 
@@ -1552,6 +1566,8 @@ func makeContestantLeaderboardPBProto(teamID int64) ([]byte, error) {
 	}
 	if shared {
 		log.Println("[DEBUG] ContestantLeaderboard shared cache!")
+	} else {
+		log.Println("[DEBUG] CACHE_NOT_USED")
 	}
 	return v.([]byte), nil
 }
