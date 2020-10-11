@@ -1561,11 +1561,9 @@ func makeLeaderboardPB(teamID int64) (*resourcespb.Leaderboard, error) {
 	if err != sql.ErrNoRows && err != nil {
 		return nil, fmt.Errorf("select leaderboard: %w", err)
 	}
-	var newestJobTime time.Time
+	newestJobTime := make(map[int64]time.Time)
 	for _, te := range leaderboard {
-		if newestJobTime.Before(te.LatestScoreMarkedAt.Time) {
-			newestJobTime = te.LatestScoreMarkedAt.Time
-		}
+		newestJobTime[te.Team().ID] = te.LatestScoreMarkedAt.Time
 	}
 	jobResultsQuery := "SELECT\n" +
 		"count(*)\n" +
@@ -1588,10 +1586,12 @@ func makeLeaderboardPB(teamID int64) (*resourcespb.Leaderboard, error) {
 	jobResults := make([]xsuportal.JobResult, 0, 2000)
 	for _, j := range jobResultsCache {
 		if teamID == j.TeamID || contestFinished || j.FinishedAt.Before(contestFreezesAt) {
-			jobResults = append(jobResults, *j)
+			if !j.FinishedAt.After(newestJobTime[j.TeamID]) {
+				jobResults = append(jobResults, *j)
+			}
 		}
 	}
-	jobResults = jobResults[:jobResults2]
+	//jobResults = jobResults[:jobResults2]
 
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit tx: %w", err)
