@@ -224,6 +224,22 @@ func (*AdminService) Initialize(e echo.Context) error {
 		})
 	}
 
+	// atatame mysql thread cache
+	wg := &sync.WaitGroup{}
+	for i := 0; i < 1000; i++ {
+		wg.Add(1)
+		go func() {
+			tx, err := db.Begin()
+			if err != nil {
+				fmt.Println("thrad cache error: ", err)
+			}
+			time.Sleep(3 * time.Second)
+			tx.Commit()
+			wg.Done()
+		}()
+	}
+	wg.Wait()
+
 	host := util.GetEnv("BENCHMARK_SERVER_HOST", "localhost")
 	port, _ := strconv.Atoi(util.GetEnv("BENCHMARK_SERVER_PORT", "50051"))
 	res := &adminpb.InitializeResponse{
