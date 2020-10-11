@@ -995,7 +995,7 @@ func (*RegistrationService) CreateTeam(e echo.Context) error {
 	}
 
 	nonStudentCount := 0
-	if !contestant.Student {
+	if !req.IsStudent {
 		nonStudentCount = 1
 	}
 
