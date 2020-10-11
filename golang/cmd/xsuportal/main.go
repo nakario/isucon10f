@@ -73,8 +73,8 @@ func main() {
 	}
 
 	db, _ = xsuportal.GetDB()
-	db.SetMaxOpenConns(200)
-	db.SetMaxIdleConns(200)
+	db.SetMaxOpenConns(1000)
+	db.SetMaxIdleConns(1000)
 
 	srv.Use(middleware.Recover())
 	srv.Use(session.Middleware(sessions.NewCookieStore([]byte("tagomoris"))))
@@ -128,6 +128,7 @@ func main() {
 	srv.POST("/api/signup", contestant.Signup)
 	srv.POST("/api/login", contestant.Login)
 	srv.POST("/api/logout", contestant.Logout)
+	srv.GET("/aokabi/test", admin.Cache)
 
 	log.Println("========================================")
 
@@ -150,6 +151,24 @@ func (p ProtoBinder) Bind(i interface{}, e echo.Context) error {
 }
 
 type AdminService struct{}
+
+func (*AdminService) Cache(e echo.Context) error {
+	// atatame mysql thread cache
+	wg := &sync.WaitGroup{}
+	for i := 0; i < 1000; i++ {
+		wg.Add(1)
+		go func() {
+			tx, err := db.Begin()
+			if err != nil {
+				fmt.Println("thrad cache error: ", err)
+			}
+			time.Sleep(3 * time.Second)
+			tx.Commit()
+			wg.Done()
+		}()
+	}
+	wg.Wait()
+}
 
 func (*AdminService) Initialize(e echo.Context) error {
 	var req adminpb.InitializeRequest
@@ -223,22 +242,6 @@ func (*AdminService) Initialize(e echo.Context) error {
 			return true
 		})
 	}
-
-	// atatame mysql thread cache
-	wg := &sync.WaitGroup{}
-	for i := 0; i < 1000; i++ {
-		wg.Add(1)
-		go func() {
-			tx, err := db.Begin()
-			if err != nil {
-				fmt.Println("thrad cache error: ", err)
-			}
-			time.Sleep(3 * time.Second)
-			tx.Commit()
-			wg.Done()
-		}()
-	}
-	wg.Wait()
 
 	host := util.GetEnv("BENCHMARK_SERVER_HOST", "localhost")
 	port, _ := strconv.Atoi(util.GetEnv("BENCHMARK_SERVER_PORT", "50051"))
