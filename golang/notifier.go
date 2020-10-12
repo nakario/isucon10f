@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"math/rand"
 	"strconv"
 	"sync"
 	"time"
@@ -143,28 +144,7 @@ func (n *Notifier) NotifyClarificationAnswered(db sqlx.Ext, c *Clarification, up
 
 func (n *Notifier) bulkNotify(db sqlx.Ext, notificationPBs map[string]*resources.Notification) (*Notification, error) {
 	now := time.Now().Round(time.Microsecond)
-	nows := make([]interface{}, 0, 2*len(notificationPBs))
-	values := ""
-	for k, v := range notificationPBs {
-		m, err := proto.Marshal(v)
-		if err != nil {
-			return nil, fmt.Errorf("marshal notification: %w", err)
-		}
-		encodedMessage := base64.StdEncoding.EncodeToString(m)
-		values += fmt.Sprintf("('%s', '%s', TRUE, ?, ?),", k, encodedMessage)
-		nows = append(nows, now, now)
-	}
-	values = values[:len(values)-1]
-	query := "INSERT INTO `notifications` (`contestant_id`, `encoded_message`, `read`, `created_at`, `updated_at`) VALUES " + values
-
-	res, err := db.Exec(
-		query,
-		nows...,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("insert notification: %w", err)
-	}
-	lastInsertID, _ := res.LastInsertId()
+	lastInsertID := rand.Int63()
 	for i, v := range notificationPBs {
 		v.Id = lastInsertID
 		v.CreatedAt = timestamppb.New(now)
@@ -179,7 +159,6 @@ func (n *Notifier) bulkNotify(db sqlx.Ext, notificationPBs map[string]*resources
 				err = n.SendWebPush(rn, &s)
 				if err != nil {
 					log.Println("send webpush: ", err)
-					db.Exec("UPDATE `notifications` SET `read` = FALSE where id = ?", v.Id)
 				}
 			}(v, subscription)
 		}
@@ -302,46 +281,4 @@ func getPushSubscriptions(db sqlx.Queryer, contestantID string) ([]PushSubscript
 		return subscriptions, nil
 	}
 	return val.([]PushSubscription), nil
-}
-
-func (n *Notifier) notify(db sqlx.Ext, notificationPB *resources.Notification, contestantID string) error {
-	m, err := proto.Marshal(notificationPB)
-	if err != nil {
-		return fmt.Errorf("marshal notification: %w", err)
-	}
-	encodedMessage := base64.StdEncoding.EncodeToString(m)
-	now := time.Now().Round(time.Microsecond)
-	res, err := db.Exec(
-		"INSERT INTO `notifications` (`contestant_id`, `encoded_message`, `read`, `created_at`, `updated_at`) VALUES (?, ?, TRUE, ?, ?)",
-		contestantID,
-		encodedMessage,
-		now,
-		now,
-	)
-	if err != nil {
-		return fmt.Errorf("insert notification: %w", err)
-	}
-	lastInsertID, _ := res.LastInsertId()
-
-	notificationPB.Id = lastInsertID
-	notificationPB.CreatedAt = timestamppb.New(now)
-
-	subscriptions, err := getPushSubscriptions(db, contestantID)
-	if err != nil {
-		return fmt.Errorf("get push subscriptions: %w", err)
-	}
-
-	go func() {
-		for i := 0; i < 3; i++ {
-			for _, subscription := range subscriptions {
-				err = n.SendWebPush(notificationPB, &subscription)
-				if err != nil {
-					log.Println("send webpush: ", err)
-				}
-			}
-			time.Sleep(100 * time.Millisecond)
-		}
-	}()
-
-	return nil
 }

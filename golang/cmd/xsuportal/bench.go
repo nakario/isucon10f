@@ -8,8 +8,6 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"net/http"
-	_ "net/http/pprof"
 	"sort"
 	"strconv"
 	"sync"
@@ -98,9 +96,6 @@ func (b *benchmarkQueueService) ReceiveBenchmarkJob(ctx context.Context, req *be
 			break
 		}
 	}
-	if jobResponse.JobHandle != nil {
-		log.Printf("[DEBUG] Dequeued: job_handle=%+v", jobResponse.JobHandle)
-	}
 	return jobResponse, nil
 }
 
@@ -164,7 +159,6 @@ func (b *benchmarkReportService) ReportBenchmarkResult(srv bench.BenchmarkReport
 			job.StartedAt.Scan(v.(time.Time))
 			BenchResultMap.Delete(key)
 
-			log.Printf("[DEBUG] %v: save as finished", req.JobId)
 			if err := b.saveAsFinished(tx, &job, ccs, req); err != nil {
 				return err
 			}
@@ -172,13 +166,15 @@ func (b *benchmarkReportService) ReportBenchmarkResult(srv bench.BenchmarkReport
 				return fmt.Errorf("commit tx: %w", err)
 			}
 
-			key2 := "0"
-			if ccs.CurrentTime.After(ccs.ContestFreezesAt) || ccs.ContestEndsAt.After(ccs.CurrentTime) {
-				key2 = strconv.Itoa(int(job.TeamID))
-			}
-			contestantLeaderboardGroup.Forget(key2)
 			if err := notifier.NotifyBenchmarkJobFinished(db, &job); err != nil {
 				return fmt.Errorf("notify benchmark job finished: %w", err)
+			}
+			if ccs.CurrentTime.After(ccs.ContestFreezesAt) && ccs.ContestEndsAt.After(ccs.CurrentTime) {
+				contestantLeaderboardGroup.Forget(strconv.Itoa(int(job.TeamID)))
+			} else {
+				forgetCond.L.Lock()
+				forgetCond.Wait()
+				forgetCond.L.Unlock()
 			}
 			return nil
 		}()
@@ -297,8 +293,6 @@ func pollBenchmarkJob() (*xsuportal.BenchmarkJob, error) {
 }
 
 func benchMain() {
-	go func() { log.Println(http.ListenAndServe(":9009", nil)) }()
-
 	jobResultsCache = make([]*xsuportal.JobResult, 0, 2000)
 
 	// benchmark job queue
@@ -312,8 +306,8 @@ func benchMain() {
 	log.Print("[INFO] listen ", address)
 
 	db, _ = xsuportal.GetDB()
-	db.SetMaxOpenConns(400)
-	db.SetMaxIdleConns(400)
+	db.SetMaxOpenConns(200)
+	db.SetMaxIdleConns(200)
 
 	server := grpc.NewServer()
 
