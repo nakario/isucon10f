@@ -10,6 +10,7 @@ import (
 	"io/ioutil"
 	"log"
 	"math/rand"
+	"net/http"
 	"strconv"
 	"sync"
 	"time"
@@ -27,6 +28,14 @@ const (
 	WebpushVAPIDPrivateKeyPath = "../vapid_private.pem"
 	WebpushSubject             = "xsuportal@example.com"
 )
+
+var client = &http.Client{}
+
+func init() {
+	transport := http.DefaultTransport.(*http.Transport)
+	transport.MaxIdleConnsPerHost = 500
+	client.Transport = transport
+}
 
 type Notifier struct {
 	mu      sync.Mutex
@@ -230,6 +239,7 @@ func (n *Notifier) SendWebPush(notificationPB *resources.Notification, pushSubsc
 			},
 		},
 		&webpush.Options{
+			HTTPClient: client,
 			Subscriber:      WebpushSubject,
 			VAPIDPublicKey:  vapidPublicKey,
 			VAPIDPrivateKey: vapidPrivateKey,
