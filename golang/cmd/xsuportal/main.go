@@ -1594,7 +1594,7 @@ func resetPublicLeaderboardCacheEvery(d time.Duration) {
 }
 
 func makePublicLeaderboardPBProto() ([]byte, error) {
-	v, err, shared := publicLeaderboardGroup.Do("0", func() (interface{}, error) {
+	v, err, _ := publicLeaderboardGroup.Do("0", func() (interface{}, error) {
 		lb, err := makeLeaderboardPB(0)
 		if err != nil {
 			return nil, err
@@ -1606,9 +1606,6 @@ func makePublicLeaderboardPBProto() ([]byte, error) {
 	})
 	if err != nil {
 		return nil, err
-	}
-	if shared {
-		log.Println("[DEBUG] PublicLeaderboard shared cache!")
 	}
 	return v.([]byte), nil
 }
@@ -1638,7 +1635,7 @@ func makeContestantLeaderboardPBProto(teamID int64) ([]byte, error) {
 		key = strconv.Itoa(int(teamID))
 	}
 
-	v, err, shared := contestantLeaderboardGroup.Do(key, func() (interface{}, error) {
+	v, err, _ := contestantLeaderboardGroup.Do(key, func() (interface{}, error) {
 		lb, err := makeLeaderboardPB(teamID)
 		if err != nil {
 			return nil, err
@@ -1650,11 +1647,6 @@ func makeContestantLeaderboardPBProto(teamID int64) ([]byte, error) {
 	})
 	if err != nil {
 		return nil, err
-	}
-	if shared {
-		log.Println("[DEBUG] ContestantLeaderboard shared cache!")
-	} else {
-		log.Println("[DEBUG] CACHE_NOT_USED")
 	}
 	return v.([]byte), nil
 }

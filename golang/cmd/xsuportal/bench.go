@@ -8,8 +8,6 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"net/http"
-	_ "net/http/pprof"
 	"sort"
 	"strconv"
 	"sync"
@@ -98,9 +96,6 @@ func (b *benchmarkQueueService) ReceiveBenchmarkJob(ctx context.Context, req *be
 			break
 		}
 	}
-	if jobResponse.JobHandle != nil {
-		log.Printf("[DEBUG] Dequeued: job_handle=%+v", jobResponse.JobHandle)
-	}
 	return jobResponse, nil
 }
 
@@ -164,7 +159,6 @@ func (b *benchmarkReportService) ReportBenchmarkResult(srv bench.BenchmarkReport
 			job.StartedAt.Scan(v.(time.Time))
 			BenchResultMap.Delete(key)
 
-			log.Printf("[DEBUG] %v: save as finished", req.JobId)
 			if err := b.saveAsFinished(tx, &job, ccs, req); err != nil {
 				return err
 			}
@@ -299,8 +293,6 @@ func pollBenchmarkJob() (*xsuportal.BenchmarkJob, error) {
 }
 
 func benchMain() {
-	go func() { log.Println(http.ListenAndServe(":9009", nil)) }()
-
 	jobResultsCache = make([]*xsuportal.JobResult, 0, 2000)
 
 	// benchmark job queue
