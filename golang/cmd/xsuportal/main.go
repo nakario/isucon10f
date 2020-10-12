@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	mrand "math/rand"
 	"net/http"
 	_ "net/http/pprof"
 	"sort"
@@ -180,6 +181,7 @@ func (*AdminService) Initialize(e echo.Context) error {
 	}
 
 	xsuportal.ContestantServer.FlushAll()
+	xsuportal.ClarificationServer.FlushAll()
 
 	xsuportal.PushSubscriptionGroup = &singleflight.Group{}
 
@@ -239,22 +241,24 @@ func (*AdminService) Initialize(e echo.Context) error {
 	return writeProto(e, http.StatusOK, res)
 }
 
+type ClarificationWithTeam struct {
+	C xsuportal.Clarification `db:"c"`
+	T xsuportal.Team          `db:"t"`
+}
+
 func (*AdminService) ListClarifications(e echo.Context) error {
 	if ok, err := loginRequired(e, db, &loginRequiredOption{Staff: true}); !ok {
 		return wrapError("check session", err)
 	}
-	type ClarificationWithTeam struct {
-		C xsuportal.Clarification `db:"c"`
-		T xsuportal.Team          `db:"t"`
+	keys := xsuportal.ClarificationServer.AllKeys()
+	clarifications := make([]ClarificationWithTeam, len(keys))
+	result := xsuportal.ClarificationServer.MGet(keys)
+	for i, k := range keys {
+		result.Get(k, &clarifications[i])
 	}
-	var clarifications []ClarificationWithTeam
-	err := db.Select(&clarifications, "SELECT "+
-		"c.id AS `c.id`, c.team_id AS `c.team_id`, c.disclosed AS `c.disclosed`, c.question AS `c.question`, c.answer AS `c.answer`, c.answered_at AS `c.answered_at`, c.created_at AS `c.created_at`, c.updated_at AS `c.updated_at`, "+
-		"t.id AS `t.id`, t.name AS `t.name`, t.leader_id AS `t.leader_id`, t.email_address AS `t.email_address`, t.invite_token AS `t.invite_token`, t.withdrawn AS `t.withdrawn`, t.created_at AS `t.created_at` "+
-		"FROM `clarifications` AS c INNER JOIN `teams` AS t ON t.id = c.team_id ORDER BY c.updated_at DESC")
-	if err != sql.ErrNoRows && err != nil {
-		return fmt.Errorf("query clarifications: %w", err)
-	}
+	sort.Slice(clarifications, func(i, j int) bool {
+		return clarifications[i].C.UpdatedAt.After(clarifications[j].C.UpdatedAt)
+	})
 	res := &adminpb.ListClarificationsResponse{}
 	for _, clarificationWT := range clarifications {
 		var clarification = clarificationWT.C
@@ -272,29 +276,10 @@ func (*AdminService) GetClarification(e echo.Context) error {
 	if ok, err := loginRequired(e, db, &loginRequiredOption{Staff: true}); !ok {
 		return wrapError("check session", err)
 	}
-	id, err := strconv.Atoi(e.Param("id"))
-	if err != nil {
-		return fmt.Errorf("parse id: %w", err)
-	}
-	var clarification xsuportal.Clarification
-	err = db.Get(
-		&clarification,
-		"SELECT * FROM `clarifications` WHERE `id` = ? LIMIT 1",
-		id,
-	)
-	if err != nil {
-		return fmt.Errorf("get clarification: %w", err)
-	}
-	var team xsuportal.Team
-	err = db.Get(
-		&team,
-		"SELECT * FROM `teams` WHERE id = ? LIMIT 1",
-		clarification.TeamID,
-	)
-	if err != nil {
-		return fmt.Errorf("get team: %w", err)
-	}
-	c, err := makeClarificationPB(db, &clarification, &team)
+	id := e.Param("id")
+	var clarification ClarificationWithTeam
+	xsuportal.ClarificationServer.Get(id, &clarification)
+	c, err := makeClarificationPB(db, &clarification.C, &clarification.T)
 	if err != nil {
 		return fmt.Errorf("make clarification: %w", err)
 	}
@@ -307,75 +292,33 @@ func (*AdminService) RespondClarification(e echo.Context) error {
 	if ok, err := loginRequired(e, db, &loginRequiredOption{Staff: true}); !ok {
 		return wrapError("check session", err)
 	}
-	id, err := strconv.Atoi(e.Param("id"))
-	if err != nil {
-		return fmt.Errorf("parse id: %w", err)
-	}
+	id := e.Param("id")
 	var req adminpb.RespondClarificationRequest
 	if err := e.Bind(&req); err != nil {
 		return err
 	}
 
-	tx, err := db.Beginx()
-	if err != nil {
-		return fmt.Errorf("begin tx: %w", err)
-	}
-	defer tx.Rollback()
-
-	var clarificationBefore xsuportal.Clarification
-	err = tx.Get(
-		&clarificationBefore,
-		"SELECT * FROM `clarifications` WHERE `id` = ? LIMIT 1 FOR UPDATE",
-		id,
-	)
-	if err == sql.ErrNoRows {
+	var clarificationBefore ClarificationWithTeam
+	if ok := xsuportal.ClarificationServer.Get(id, &clarificationBefore); !ok {
 		return halt(e, http.StatusNotFound, "質問が見つかりません", nil)
 	}
-	if err != nil {
-		return fmt.Errorf("get clarification with lock: %w", err)
-	}
-	wasAnswered := clarificationBefore.AnsweredAt.Valid
-	wasDisclosed := clarificationBefore.Disclosed
+	wasAnswered := clarificationBefore.C.AnsweredAt.Valid
+	wasDisclosed := clarificationBefore.C.Disclosed
 
 	now := time.Now().Round(time.Microsecond)
-	_, err = tx.Exec(
-		"UPDATE `clarifications` SET `disclosed` = ?, `answer` = ?, `updated_at` = ?, `answered_at` = ? WHERE `id` = ? LIMIT 1",
-		req.Disclose,
-		req.Answer,
-		now,
-		now,
-		id,
-	)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return halt(e, http.StatusNotFound, "質問が見つかりません", nil)
-		}
-		return fmt.Errorf("update clarification: %w", err)
-	}
-	var clarification xsuportal.Clarification = clarificationBefore
-	clarification.Disclosed.Scan(req.Disclose)
-	clarification.Answer.Scan(req.Answer)
-	clarification.UpdatedAt = now
-	clarification.AnsweredAt.Scan(now)
-	var team xsuportal.Team
-	err = tx.Get(
-		&team,
-		"SELECT * FROM `teams` WHERE `id` = ? LIMIT 1",
-		clarification.TeamID,
-	)
-	if err != nil {
-		return fmt.Errorf("get team: %w", err)
-	}
-	c, err := makeClarificationPB(tx, &clarification, &team)
+	var clarification ClarificationWithTeam = clarificationBefore
+	clarification.C.Disclosed.Scan(req.Disclose)
+	clarification.C.Answer.Scan(req.Answer)
+	clarification.C.UpdatedAt = now
+	clarification.C.AnsweredAt.Scan(now)
+	xsuportal.ClarificationServer.Set(id, clarification)
+	c, err := makeClarificationPB(db, &clarification.C, &clarification.T)
 	if err != nil {
 		return fmt.Errorf("make clarification: %w", err)
 	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit tx: %w", err)
-	}
 	go func() {
-		updated := wasAnswered && wasDisclosed == clarification.Disclosed
-		if err := notifier.NotifyClarificationAnswered(db, &clarification, updated); err != nil {
+		updated := wasAnswered && wasDisclosed == clarification.C.Disclosed
+		if err := notifier.NotifyClarificationAnswered(db, &clarification.C, updated); err != nil {
 			fmt.Errorf("notify clarification answered: %w", err)
 		}
 	}()
@@ -537,49 +480,29 @@ func (*ContestantService) ListClarifications(e echo.Context) error {
 	if ok, err := loginRequired(e, db, &loginRequiredOption{Team: true}); !ok {
 		return wrapError("check session", err)
 	}
-	team, _ := getCurrentTeam(e, db, false)
-	var clarifications []xsuportal.Clarification
-	err := db.Select(
-		&clarifications,
-		"SELECT * FROM `clarifications` WHERE `team_id` = ? OR `disclosed` = TRUE ORDER BY `id` DESC",
-		team.ID,
-	)
-	if err != sql.ErrNoRows && err != nil {
-		return fmt.Errorf("select clarifications: %w", err)
-	}
-	res := &contestantpb.ListClarificationsResponse{}
-	if err == sql.ErrNoRows || len(clarifications) == 0 {
-		return writeProto(e, http.StatusOK, res)
-	}
-
-	var teamIds string
-	for _, v := range clarifications {
-		teamIds += strconv.FormatInt(v.TeamID, 10)
-		teamIds += ","
-	}
-	teamIds = teamIds[:len(teamIds)-1]
-	teamPBs := make(map[int64]*resourcespb.Team, 10)
-	teams := make([]xsuportal.Team, 10)
-	err = db.Select(
-		&teams,
-		"SELECT * FROM `teams` where id in (?)",
-		teamIds,
-	)
-	if err != nil {
-		return fmt.Errorf("query : %w", err)
-	}
-	// make teamPB
-	for _, v := range teams {
-		teamPB, err := makeTeamPB(db, &v, false, true)
-		if err != nil {
-			fmt.Errorf("make teamPBs : %w", err)
-			continue
+	contestant, _ := getCurrentContestant(e, db, false)
+	keys := xsuportal.ClarificationServer.AllKeys()
+	clarifications := make([]ClarificationWithTeam, 0, len(keys))
+	result := xsuportal.ClarificationServer.MGet(keys)
+	for _, k := range keys {
+		var clar ClarificationWithTeam
+		result.Get(k, &clar)
+		if clar.C.TeamID == contestant.TeamID.Int64 || clar.C.Disclosed.Bool {
+			clarifications = append(clarifications, clar)
 		}
-		teamPBs[v.ID] = teamPB
 	}
+	sort.Slice(clarifications, func(i, j int) bool {
+		return clarifications[i].C.CreatedAt.After(clarifications[j].C.CreatedAt)
+	})
+	res := &contestantpb.ListClarificationsResponse{}
 
 	for _, clarification := range clarifications {
-		c, err := makeClarificationPBfromTeamPB(db, &clarification, teamPBs[clarification.TeamID])
+		teamPB, err := makeTeamPB(db, &clarification.T, false, true)
+		if err != nil {
+			fmt.Errorf("make teamPBs: %w", err)
+			continue
+		}
+		c, err := makeClarificationPBfromTeamPB(db, &clarification.C, teamPB)
 		if err != nil {
 			return fmt.Errorf("make clarification: %w", err)
 		}
@@ -596,29 +519,20 @@ func (*ContestantService) RequestClarification(e echo.Context) error {
 	if err := e.Bind(&req); err != nil {
 		return err
 	}
-	tx, err := db.Beginx()
-	if err != nil {
-		return fmt.Errorf("begin tx: %w", err)
+	team, _ := getCurrentTeam(e, db, false)
+	now := time.Now().Round(time.Microsecond)
+	clarification := ClarificationWithTeam{
+		C: xsuportal.Clarification{
+			ID: mrand.Int63(),
+			TeamID: team.ID,
+			CreatedAt: now,
+			UpdatedAt: now,
+		},
+		T: *team,
 	}
-	defer tx.Rollback()
-	team, _ := getCurrentTeam(e, tx, false)
-	_, err = tx.Exec(
-		"INSERT INTO `clarifications` (`team_id`, `question`, `created_at`, `updated_at`) VALUES (?, ?, NOW(6), NOW(6))",
-		team.ID,
-		req.Question,
-	)
-	if err != nil {
-		return fmt.Errorf("insert clarification: %w", err)
-	}
-	var clarification xsuportal.Clarification
-	err = tx.Get(&clarification, "SELECT * FROM `clarifications` WHERE `id` = LAST_INSERT_ID() LIMIT 1")
-	if err != nil {
-		return fmt.Errorf("get clarification: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit tx: %w", err)
-	}
-	c, err := makeClarificationPB(db, &clarification, team)
+	clarification.C.Question.Scan(req.Question)
+	xsuportal.ClarificationServer.Set(strconv.FormatInt(clarification.C.ID, 10), clarification)
+	c, err := makeClarificationPB(db, &clarification.C, team)
 	if err != nil {
 		return fmt.Errorf("make clarification: %w", err)
 	}

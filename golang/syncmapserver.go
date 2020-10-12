@@ -38,6 +38,7 @@ var isMasterServerIP = MyServerIsOnMasterServerIP()
 // 中身の例:
 // {jfoeajfoea23(contestant.ID): contestant, 21(teamID): [joefajre24, jieurae3]}
 var ContestantServer = NewSyncMapServerConn(GetMasterServerAddress()+":8884", isMasterServerIP)
+var ClarificationServer = NewSyncMapServerConn(GetMasterServerAddress()+":8883", isMasterServerIP)
 
 func MyServerIsOnMasterServerIP() bool {
 	conn, err := net.Dial("udp", "8.8.8.8:80")
